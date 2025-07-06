@@ -7,21 +7,73 @@ use bevy::{
 	},
 };
 use bevy_egui::{EguiContexts, egui};
+use log::{error, info};
 use noise::{NoiseFn, OpenSimplex};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
+use anyhow::Result;
 
 pub struct TerrainPlugin;
 
 impl Plugin for TerrainPlugin {
 	fn build(&self, app: &mut App) {
-		app.insert_resource(TerrainConfig::default())
-			.insert_resource(NoiseConfig::default())
+		app.insert_resource(load_settings())
 			.add_systems(Startup, setup_terrain)
 			.add_systems(Update, update_terrain)
 			.add_systems(bevy_egui::EguiPrimaryContextPass, ui_system);
 	}
 }
 
-#[derive(Resource)]
+#[derive(Resource, Serialize, Deserialize, Clone)]
+struct Settings {
+	terrain: TerrainConfig,
+	noise: NoiseConfig,
+}
+
+impl Settings {
+	fn save(&self) -> Result<()> {
+		let settings_path = "terrain_settings.json";
+		let json = serde_json::to_string_pretty(self)?;
+		fs::write(settings_path, json)?;
+		Ok(())
+	}
+
+	fn load() -> Result<Self> {
+		let settings_path = "terrain_settings.json";
+		if Path::new(settings_path).exists() {
+			let json = fs::read_to_string(settings_path)?;
+			let settings = serde_json::from_str(&json)?;
+			Ok(settings)
+		} else {
+			Ok(Settings::default())
+		}
+	}
+}
+
+impl Default for Settings {
+	fn default() -> Self {
+		Self {
+			terrain: TerrainConfig::default(),
+			noise: NoiseConfig::default(),
+		}
+	}
+}
+
+fn load_settings() -> Settings {
+	match Settings::load() {
+		Ok(settings) => {
+			info!("Loaded terrain settings from file");
+			settings
+		}
+		Err(e) => {
+			error!("Failed to load settings: {}. Using defaults.", e);
+			Settings::default()
+		}
+	}
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct TerrainConfig {
 	world_size: f32,
 	resolution_multiplier: u32,
@@ -60,7 +112,7 @@ impl Default for TerrainConfig {
 	}
 }
 
-#[derive(Resource)]
+#[derive(Serialize, Deserialize, Clone)]
 struct NoiseConfig {
 	seed: u32,
 	offset_x: f32,
@@ -106,32 +158,28 @@ struct NoiseTexture;
 #[derive(Component)]
 struct TerrainMesh;
 
-fn ui_system(
-	mut contexts: EguiContexts,
-	mut noise_params: ResMut<NoiseConfig>,
-	mut terrain_config: ResMut<TerrainConfig>,
-) {
+fn ui_system(mut contexts: EguiContexts, mut settings: ResMut<Settings>) {
 	if let Ok(ctx) = contexts.ctx_mut() {
 		egui::Window::new("Terrain Controls").show(ctx, |ui| {
 			ui.label("Terrain Configuration:");
 
 			ui.label("Resolution Multiplier:");
 			ui.add(
-				egui::Slider::new(&mut terrain_config.resolution_multiplier, 1..=32).step_by(1.0),
+				egui::Slider::new(&mut settings.terrain.resolution_multiplier, 1..=32).step_by(1.0),
 			);
 
 			ui.label(&format!(
 				"Grid Size: {}x{}",
-				terrain_config.grid_size(),
-				terrain_config.grid_size()
+				settings.terrain.grid_size(),
+				settings.terrain.grid_size()
 			));
 
 			ui.label("World Size:");
-			ui.add(egui::Slider::new(&mut terrain_config.world_size, 1.0..=20.0).step_by(0.5));
+			ui.add(egui::Slider::new(&mut settings.terrain.world_size, 1.0..=20.0).step_by(0.5));
 
 			ui.label("Height Multiplier:");
 			ui.add(egui::Slider::new(
-				&mut terrain_config.height_multiplier,
+				&mut settings.terrain.height_multiplier,
 				0.1..=5.0,
 			));
 
@@ -139,31 +187,46 @@ fn ui_system(
 			ui.label("Noise Parameters:");
 
 			ui.label("Seed:");
-			ui.add(egui::DragValue::new(&mut noise_params.seed).speed(1.0));
+			ui.add(egui::DragValue::new(&mut settings.noise.seed).speed(1.0));
 
 			ui.label("Offset X:");
-			ui.add(egui::Slider::new(&mut noise_params.offset_x, -10.0..=10.0).step_by(0.1));
+			ui.add(egui::Slider::new(&mut settings.noise.offset_x, -10.0..=10.0).step_by(0.1));
 
 			ui.label("Offset Z:");
-			ui.add(egui::Slider::new(&mut noise_params.offset_z, -10.0..=10.0).step_by(0.1));
+			ui.add(egui::Slider::new(&mut settings.noise.offset_z, -10.0..=10.0).step_by(0.1));
 
 			ui.label("Scale:");
-			ui.add(egui::Slider::new(&mut noise_params.scale, 0.01..=10.0));
+			ui.add(egui::Slider::new(&mut settings.noise.scale, 0.01..=10.0));
 
 			ui.label("Octaves:");
-			ui.add(egui::Slider::new(&mut noise_params.octaves, 1..=8).step_by(1.0));
+			ui.add(egui::Slider::new(&mut settings.noise.octaves, 1..=8).step_by(1.0));
 
 			ui.label("Persistence:");
-			ui.add(egui::Slider::new(&mut noise_params.persistence, 0.0..=1.0));
+			ui.add(egui::Slider::new(
+				&mut settings.noise.persistence,
+				0.0..=1.0,
+			));
 
 			ui.label("Lacunarity:");
-			ui.add(egui::Slider::new(&mut noise_params.lacunarity, 1.01..=4.0));
+			ui.add(egui::Slider::new(
+				&mut settings.noise.lacunarity,
+				1.01..=4.0,
+			));
 
 			ui.label("Valley Exponent:");
 			ui.add(egui::Slider::new(
-				&mut noise_params.valley_exponent,
+				&mut settings.noise.valley_exponent,
 				0.0..=10.0,
 			));
+
+			ui.separator();
+			if ui.button("Save Settings").clicked() {
+				if let Err(e) = settings.save() {
+					error!("Failed to save settings: {}", e);
+				} else {
+					info!("Settings saved successfully");
+				}
+			}
 		});
 	}
 }
@@ -173,13 +236,12 @@ fn update_terrain(
 	mut images: ResMut<Assets<Image>>,
 	mut terrain_query: Query<&mut Mesh3d, With<TerrainMesh>>,
 	mut meshes: ResMut<Assets<Mesh>>,
-	noise_params: Res<NoiseConfig>,
-	terrain_config: Res<TerrainConfig>,
+	settings: Res<Settings>,
 ) {
-	// Only update if either noise or terrain config has changed
-	if noise_params.is_changed() || terrain_config.is_changed() {
-		let grid_size = terrain_config.grid_size();
-		let height_map = generate_height_map(grid_size, grid_size, &noise_params);
+	// Only update if settings have changed
+	if settings.is_changed() {
+		let grid_size = settings.terrain.grid_size();
+		let height_map = generate_height_map(grid_size, grid_size, &settings.noise);
 		if let Ok(mut image_node) = noise_texture_query.single_mut() {
 			let new_texture = generate_texture_from_height_map(&height_map, grid_size, grid_size);
 			let new_texture_handle = images.add(new_texture);
@@ -190,9 +252,9 @@ fn update_terrain(
 				&height_map,
 				grid_size,
 				grid_size,
-				terrain_config.world_width(),
-				terrain_config.world_length(),
-				terrain_config.height_multiplier,
+				settings.terrain.world_width(),
+				settings.terrain.world_length(),
+				settings.terrain.height_multiplier,
 			);
 
 			let new_mesh_handle = meshes.add(new_terrain_mesh);
@@ -387,20 +449,19 @@ fn setup_terrain(
 	mut meshes: ResMut<Assets<Mesh>>,
 	mut materials: ResMut<Assets<StandardMaterial>>,
 	mut images: ResMut<Assets<Image>>,
-	noise_config: Res<NoiseConfig>,
-	terrain_config: Res<TerrainConfig>,
+	settings: Res<Settings>,
 ) {
 	// Generate height map once
-	let grid_size = terrain_config.grid_size();
-	let height_map = generate_height_map(grid_size, grid_size, &noise_config);
+	let grid_size = settings.terrain.grid_size();
+	let height_map = generate_height_map(grid_size, grid_size, &settings.noise);
 
 	let terrain_mesh = generate_mesh_from_height_map(
 		&height_map,
 		grid_size,
 		grid_size,
-		terrain_config.world_width(),
-		terrain_config.world_length(),
-		terrain_config.height_multiplier,
+		settings.terrain.world_width(),
+		settings.terrain.world_length(),
+		settings.terrain.height_multiplier,
 	);
 	let noise_texture = generate_texture_from_height_map(&height_map, grid_size, grid_size);
 	let terrain_handle = meshes.add(terrain_mesh);
