@@ -23,6 +23,14 @@ struct TerrainConfig {
 	height_multiplier: f32,
 }
 
+impl PartialEq for TerrainConfig {
+	fn eq(&self, other: &Self) -> bool {
+		self.world_size.to_bits() == other.world_size.to_bits()
+			&& self.resolution_multiplier == other.resolution_multiplier
+			&& self.height_multiplier.to_bits() == other.height_multiplier.to_bits()
+	}
+}
+
 impl TerrainConfig {
 	fn grid_size(&self) -> u32 {
 		(16.0 * self.resolution_multiplier as f32) as u32
@@ -57,6 +65,19 @@ struct NoiseConfig {
 	persistence: f32,
 	lacunarity: f32,
 	valley_exponent: f32,
+}
+
+impl PartialEq for NoiseConfig {
+	fn eq(&self, other: &Self) -> bool {
+		self.seed == other.seed
+			&& self.offset_x.to_bits() == other.offset_x.to_bits()
+			&& self.offset_z.to_bits() == other.offset_z.to_bits()
+			&& self.scale.to_bits() == other.scale.to_bits()
+			&& self.octaves == other.octaves
+			&& self.persistence.to_bits() == other.persistence.to_bits()
+			&& self.lacunarity.to_bits() == other.lacunarity.to_bits()
+			&& self.valley_exponent.to_bits() == other.valley_exponent.to_bits()
+	}
 }
 
 impl Default for NoiseConfig {
@@ -95,7 +116,7 @@ fn main() {
 		.insert_resource(TerrainConfig::default())
 		.insert_resource(NoiseConfig::default())
 		.add_systems(Startup, setup)
-		.add_systems(Update, update_terrain_mesh)
+		.add_systems(Update, update_terrain)
 		.add_systems(bevy_egui::EguiPrimaryContextPass, ui_system)
 		.run();
 }
@@ -182,7 +203,7 @@ fn ui_system(
 
 			ui.label("Resolution Multiplier:");
 			ui.add(
-				egui::Slider::new(&mut terrain_config.resolution_multiplier, 1..=8).step_by(1.0),
+				egui::Slider::new(&mut terrain_config.resolution_multiplier, 1..=32).step_by(1.0),
 			);
 
 			ui.label(&format!(
@@ -230,7 +251,7 @@ fn ui_system(
 	}
 }
 
-fn update_terrain_mesh(
+fn update_terrain(
 	mut noise_texture_query: Query<&mut ImageNode, With<NoiseTexture>>,
 	mut images: ResMut<Assets<Image>>,
 	mut terrain_query: Query<&mut Mesh3d, With<TerrainMesh>>,
@@ -238,11 +259,16 @@ fn update_terrain_mesh(
 	noise_params: Res<NoiseConfig>,
 	terrain_config: Res<TerrainConfig>,
 ) {
-	if let Ok(mut mesh_3d) = terrain_query.single_mut() {
+	// Only update if either noise or terrain config has changed
+	if noise_params.is_changed() || terrain_config.is_changed() {
+		let grid_size = terrain_config.grid_size();
+		let height_map = generate_height_map(grid_size, grid_size, &noise_params);
 		if let Ok(mut image_node) = noise_texture_query.single_mut() {
-			let grid_size = terrain_config.grid_size();
-			let height_map = generate_height_map(grid_size, grid_size, &noise_params);
-
+			let new_texture = generate_texture_from_height_map(&height_map, grid_size, grid_size);
+			let new_texture_handle = images.add(new_texture);
+			*image_node = ImageNode::new(new_texture_handle);
+		}
+		if let Ok(mut mesh_3d) = terrain_query.single_mut() {
 			let new_terrain_mesh = generate_mesh_from_height_map(
 				&height_map,
 				grid_size,
@@ -251,12 +277,9 @@ fn update_terrain_mesh(
 				terrain_config.world_length(),
 				terrain_config.height_multiplier,
 			);
+
 			let new_mesh_handle = meshes.add(new_terrain_mesh);
 			*mesh_3d = Mesh3d(new_mesh_handle);
-
-			let new_texture = generate_texture_from_height_map(&height_map, grid_size, grid_size);
-			let new_texture_handle = images.add(new_texture);
-			*image_node = ImageNode::new(new_texture_handle);
 		}
 	}
 }
@@ -290,7 +313,10 @@ fn generate_height_map(grid_width: u32, grid_height: u32, params: &NoiseConfig) 
 	let noise = OpenSimplex::new(params.seed);
 	let mut height_map = HeightMap::new(grid_width, grid_height);
 
-	// First pass: generate raw height values
+	// Values for normalization
+	let mut min_height = f32::INFINITY;
+	let mut max_height = f32::NEG_INFINITY;
+
 	for z in 0..=grid_height {
 		for x in 0..=grid_width {
 			let x_pos = (x as f32 / grid_width as f32) - 0.5;
@@ -298,17 +324,7 @@ fn generate_height_map(grid_width: u32, grid_height: u32, params: &NoiseConfig) 
 
 			let height = calculate_height_at_position(x_pos, z_pos, params, &noise);
 			height_map.set(x, z, height);
-		}
-	}
 
-	// Second pass: normalize to full 0-1 range
-	let mut min_height = f32::INFINITY;
-	let mut max_height = f32::NEG_INFINITY;
-
-	// Find min and max values
-	for z in 0..=grid_height {
-		for x in 0..=grid_width {
-			let height = height_map.get(x, z);
 			min_height = min_height.min(height);
 			max_height = max_height.max(height);
 		}
@@ -414,7 +430,9 @@ fn generate_mesh_from_height_map(
 
 	// Calculate normals
 	let mut normals_calculated = vec![[0.0, 0.0, 0.0]; positions.len()];
+	let mut normal_counts = vec![0; positions.len()];
 
+	// First pass: calculate face normals and accumulate them
 	for chunk in indices.chunks(3) {
 		if chunk.len() == 3 {
 			let i0 = chunk[0] as usize;
@@ -427,39 +445,39 @@ fn generate_mesh_from_height_map(
 
 			let edge1 = v1 - v0;
 			let edge2 = v2 - v0;
-			let normal = edge1.cross(edge2).normalize();
+			let face_normal = edge1.cross(edge2);
 
-			normals_calculated[i0] = [normal.x, normal.y, normal.z];
-			normals_calculated[i1] = [normal.x, normal.y, normal.z];
-			normals_calculated[i2] = [normal.x, normal.y, normal.z];
+			// Add this face normal to all three vertices
+			normals_calculated[i0][0] += face_normal.x;
+			normals_calculated[i0][1] += face_normal.y;
+			normals_calculated[i0][2] += face_normal.z;
+			normal_counts[i0] += 1;
+
+			normals_calculated[i1][0] += face_normal.x;
+			normals_calculated[i1][1] += face_normal.y;
+			normals_calculated[i1][2] += face_normal.z;
+			normal_counts[i1] += 1;
+
+			normals_calculated[i2][0] += face_normal.x;
+			normals_calculated[i2][1] += face_normal.y;
+			normals_calculated[i2][2] += face_normal.z;
+			normal_counts[i2] += 1;
 		}
 	}
 
-	// Average normals for shared vertices
+	// Second pass: normalize the accumulated normals
 	for i in 0..normals_calculated.len() {
-		let mut normal_sum = Vec3::ZERO;
-		let mut count = 0;
-
-		for chunk in indices.chunks(3) {
-			if chunk.len() == 3 && chunk.contains(&(i as u32)) {
-				let i0 = chunk[0] as usize;
-				let i1 = chunk[1] as usize;
-				let i2 = chunk[2] as usize;
-
-				let v0 = Vec3::from(positions[i0]);
-				let v1 = Vec3::from(positions[i1]);
-				let v2 = Vec3::from(positions[i2]);
-
-				let edge1 = v1 - v0;
-				let edge2 = v2 - v0;
-				normal_sum += edge1.cross(edge2);
-				count += 1;
-			}
-		}
-
-		if count > 0 {
-			let averaged_normal = normal_sum.normalize();
-			normals_calculated[i] = [averaged_normal.x, averaged_normal.y, averaged_normal.z];
+		if normal_counts[i] > 0 {
+			let normal = Vec3::new(
+				normals_calculated[i][0],
+				normals_calculated[i][1],
+				normals_calculated[i][2],
+			);
+			let normalized = normal.normalize();
+			normals_calculated[i] = [normalized.x, normalized.y, normalized.z];
+		} else {
+			// Fallback for vertices not used in any triangle
+			normals_calculated[i] = [0.0, 1.0, 0.0];
 		}
 	}
 
