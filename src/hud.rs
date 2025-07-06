@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 
+use crate::MainCamera;
+
 #[derive(Component)]
 pub struct HudText;
 
@@ -34,7 +36,7 @@ fn setup_hud(mut commands: Commands) {
 }
 
 fn update_hud(
-	camera_query: Query<&Transform, With<bevy_panorbit_camera::PanOrbitCamera>>,
+	camera_query: Query<&Transform, With<MainCamera>>,
 	mut hud_query: Query<&mut Text, With<HudText>>,
 ) {
 	if let Ok(camera_transform) = camera_query.single() {
