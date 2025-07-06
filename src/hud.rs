@@ -24,7 +24,7 @@ fn setup_hud(mut commands: Commands) {
 			HudText,
 			Text::new("Camera Transform: Loading..."),
 			TextFont {
-				font_size: 18.0,
+				font_size: 10.0,
 				..default()
 			},
 			TextColor(Color::WHITE),
