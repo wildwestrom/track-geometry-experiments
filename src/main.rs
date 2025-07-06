@@ -20,7 +20,7 @@ use hud::CameraDebugHud;
 struct NoiseParameters {
 	seed: u32,
 	offset_x: f32,
-	offset_y: f32,
+	offset_z: f32,
 	scale: f32,
 	octaves: u8,
 	persistence: f32,
@@ -35,7 +35,7 @@ impl Default for NoiseParameters {
 		Self {
 			seed: 0,
 			offset_x: 0.0,
-			offset_y: 0.0,
+			offset_z: 0.0,
 			scale: 0.75,
 			octaves: 8,
 			persistence: 0.4,
@@ -54,7 +54,7 @@ struct NoiseTexture;
 struct TerrainMesh;
 
 const NOISE_MAX: f64 = 0.544;
-const TERRAIN_SIZE: u32 = 512;
+const TERRAIN_SIZE: u32 = 64;
 
 fn main() {
 	App::new()
@@ -82,8 +82,12 @@ fn setup(
 	mut images: ResMut<Assets<Image>>,
 	noise_params: Res<NoiseParameters>,
 ) {
-	let (terrain_mesh, noise_texture) =
-		generate_terrain_mesh(TERRAIN_SIZE, TERRAIN_SIZE, 5.0, 5.0, &noise_params);
+	// Generate height map once
+	let height_map = generate_height_map(TERRAIN_SIZE, TERRAIN_SIZE, &noise_params);
+
+	let terrain_mesh =
+		generate_mesh_from_height_map(&height_map, TERRAIN_SIZE, TERRAIN_SIZE, 5.0, 5.0);
+	let noise_texture = generate_texture_from_height_map(&height_map, TERRAIN_SIZE, TERRAIN_SIZE);
 	let terrain_handle = meshes.add(terrain_mesh);
 	let noise_handle = images.add(noise_texture);
 
@@ -118,28 +122,18 @@ fn setup(
 		},
 	));
 
-	commands
-		.spawn((
-			ImageNode::new(noise_handle),
-			NoiseTexture,
-			Node {
-				justify_self: JustifySelf::End,
-				align_self: AlignSelf::Start,
-				width: Val::Px(128.0),
-				height: Val::Px(128.0),
-				padding: UiRect::all(Val::Px(10.0)),
-				..default()
-			},
-		))
-		.with_child((
-			Text::new("Noise Preview"),
-			TextFont {
-				font_size: 24.0,
-				..default()
-			},
-			TextColor(Color::WHITE),
-			Node { ..default() },
-		));
+	commands.spawn((
+		ImageNode::new(noise_handle),
+		NoiseTexture,
+		Node {
+			justify_self: JustifySelf::End,
+			align_self: AlignSelf::Start,
+			width: Val::Px(256.0),
+			height: Val::Px(256.0),
+			padding: UiRect::all(Val::Px(10.0)),
+			..default()
+		},
+	));
 }
 
 fn ui_system(mut contexts: EguiContexts, mut noise_params: ResMut<NoiseParameters>) {
@@ -150,20 +144,20 @@ fn ui_system(mut contexts: EguiContexts, mut noise_params: ResMut<NoiseParameter
 
 			ui.label("Offset X:");
 			ui.add(
-				egui::Slider::new(&mut noise_params.offset_x, -1000.0..=1000.0)
-					.step_by(0.0)
+				egui::Slider::new(&mut noise_params.offset_x, -10.0..=10.0)
+					.step_by(0.1)
 					.text("Offset X"),
 			);
 
-			ui.label("Offset Y:");
+			ui.label("Offset Z:");
 			ui.add(
-				egui::Slider::new(&mut noise_params.offset_y, -1000.0..=1000.0)
-					.step_by(0.0)
-					.text("Offset Y"),
+				egui::Slider::new(&mut noise_params.offset_z, -10.0..=10.0)
+					.step_by(0.1)
+					.text("Offset Z"),
 			);
 
 			ui.label("Scale:");
-			ui.add(egui::Slider::new(&mut noise_params.scale, 0.01..=1.5).text("Scale"));
+			ui.add(egui::Slider::new(&mut noise_params.scale, 0.01..=10.0).text("Scale"));
 
 			ui.label("Octaves:");
 			ui.add(
@@ -211,27 +205,105 @@ fn update_terrain_mesh(
 	mut meshes: ResMut<Assets<Mesh>>,
 	noise_params: Res<NoiseParameters>,
 ) {
-		if let Ok(mut mesh_3d) = terrain_query.single_mut() {
-			let (new_terrain_mesh, new_texture) =
-				generate_terrain_mesh(TERRAIN_SIZE, TERRAIN_SIZE, 5.0, 5.0, &noise_params);
+	if let Ok(mut mesh_3d) = terrain_query.single_mut() {
+		if let Ok(mut image_node) = noise_texture_query.single_mut() {
+			let height_map = generate_height_map(TERRAIN_SIZE, TERRAIN_SIZE, &noise_params);
+
+			let new_terrain_mesh =
+				generate_mesh_from_height_map(&height_map, TERRAIN_SIZE, TERRAIN_SIZE, 5.0, 5.0);
 			let new_mesh_handle = meshes.add(new_terrain_mesh);
 			*mesh_3d = Mesh3d(new_mesh_handle);
 
-			if let Ok(mut image_node) = noise_texture_query.single_mut() {
-				let new_texture_handle = images.add(new_texture);
-				*image_node = ImageNode::new(new_texture_handle);
-			}
+			let new_texture =
+				generate_texture_from_height_map(&height_map, TERRAIN_SIZE, TERRAIN_SIZE);
+			let new_texture_handle = images.add(new_texture);
+			*image_node = ImageNode::new(new_texture_handle);
+		}
 	}
 }
 
-fn generate_terrain_mesh(
+#[derive(Debug)]
+struct HeightMap {
+	width: u32,
+	heights: Vec<f32>,
+}
+
+impl HeightMap {
+	fn new(width: u32, height: u32) -> Self {
+		Self {
+			width,
+			heights: vec![0.0; ((width + 1) * (height + 1)) as usize],
+		}
+	}
+
+	fn get(&self, x: u32, z: u32) -> f32 {
+		let index = (z * (self.width + 1) + x) as usize;
+		self.heights[index]
+	}
+
+	fn set(&mut self, x: u32, z: u32, height: f32) {
+		let index = (z * (self.width + 1) + x) as usize;
+		self.heights[index] = height;
+	}
+}
+
+fn generate_height_map(grid_width: u32, grid_height: u32, params: &NoiseParameters) -> HeightMap {
+	let noise = OpenSimplex::new(params.seed);
+	let mut height_map = HeightMap::new(grid_width, grid_height);
+
+	// Generate height values for each vertex using normalized coordinates
+	for z in 0..=grid_height {
+		for x in 0..=grid_width {
+			let x_pos = (x as f32 / grid_width as f32) - 0.5;
+			let z_pos = (z as f32 / grid_height as f32) - 0.5;
+
+			let height = calculate_height_at_position(x_pos, z_pos, params, &noise);
+			height_map.set(x, z, height);
+		}
+	}
+
+	height_map
+}
+
+fn calculate_height_at_position(
+	x_pos: f32,
+	z_pos: f32,
+	params: &NoiseParameters,
+	noise: &OpenSimplex,
+) -> f32 {
+	let mut amplitude = 1.0_f64;
+	let mut frequency = 1.0_f64;
+	let mut noise_value = 0.0_f64;
+	let mut max_value = 0.0_f64;
+
+	// Generate fractal noise using multiple octaves
+	for _ in 0..params.octaves {
+		let sample_x = (x_pos + params.offset_x) as f64 * params.scale as f64 * frequency;
+		let sample_z = (z_pos + params.offset_z) as f64 * params.scale as f64 * frequency;
+
+		let raw_noise_sample = (noise.get([sample_x, sample_z]) / NOISE_MAX).clamp(-1.0, 1.0);
+		noise_value += raw_noise_sample * amplitude;
+		max_value += amplitude;
+
+		amplitude *= params.persistence as f64;
+		frequency *= params.lacunarity as f64;
+	}
+
+	// Normalize and apply valley effect
+	noise_value /= max_value;
+	let normalized_value = (noise_value + 1.0) * 0.5;
+	let valley_value =
+		(normalized_value * params.fudge_factor as f64).powf(params.valley_exponent as f64);
+	(valley_value * params.terrain_height as f64) as f32
+}
+
+fn generate_mesh_from_height_map(
+	height_map: &HeightMap,
 	grid_width: u32,
 	grid_height: u32,
 	world_width: f32,
 	world_height: f32,
-	params: &NoiseParameters,
-) -> (Mesh, Image) {
-	let noise = OpenSimplex::new(params.seed);
+) -> Mesh {
 	let mut positions = Vec::new();
 	let mut normals = Vec::new();
 	let mut uvs = Vec::new();
@@ -240,63 +312,18 @@ fn generate_terrain_mesh(
 	let width_step = world_width / grid_width as f32;
 	let height_step = world_height / grid_height as f32;
 
-	let mut texture_data =
-		Vec::with_capacity(((grid_width + 1) * (grid_height + 1) * 4) as usize);
-
 	// Generate vertices
 	for z in 0..=grid_height {
 		for x in 0..=grid_width {
 			let x_pos = (x as f32 * width_step) - world_width / 2.0;
 			let z_pos = (z as f32 * height_step) - world_height / 2.0;
-
-			// Generate height using the same noise function
-			let mut amplitude = 1.0_f64;
-			let mut frequency = 1.0_f64;
-			let mut noise_value = 0.0_f64;
-			let mut max_value = 0.0_f64;
-
-			for _ in 0..params.octaves {
-				let sample_x = (x_pos + params.offset_x) as f64 * params.scale as f64 * frequency;
-				let sample_z = (z_pos + params.offset_y) as f64 * params.scale as f64 * frequency;
-
-				let raw_noise_sample =
-					(noise.get([sample_x, sample_z]) / NOISE_MAX).clamp(-1.0, 1.0);
-				noise_value += raw_noise_sample * amplitude;
-				max_value += amplitude;
-
-				amplitude *= params.persistence as f64;
-				frequency *= params.lacunarity as f64;
-			}
-
-			noise_value /= max_value;
-			let normalized_value = (noise_value + 1.0) * 0.5;
-			let valley_value =
-				(normalized_value * params.fudge_factor as f64).powf(params.valley_exponent as f64);
-			let y_pos = (valley_value * params.terrain_height as f64) as f32;
-
-			let pixel_value = (valley_value * 255.0) as u8;
-
-			texture_data.extend_from_slice(&[pixel_value, pixel_value, pixel_value, 255]);
+			let y_pos = height_map.get(x, z);
 
 			positions.push([x_pos, y_pos, z_pos]);
 			normals.push([0.0, 1.0, 0.0]); // Will be recalculated
-			uvs.push([
-				x as f32 / grid_width as f32,
-				z as f32 / grid_height as f32,
-			]);
+			uvs.push([x as f32 / grid_width as f32, z as f32 / grid_height as f32]);
 		}
 	}
-	let img = Image::new_fill(
-		Extent3d {
-			width: grid_width + 1,
-			height: grid_height + 1,
-			depth_or_array_layers: 1,
-		},
-		TextureDimension::D2,
-		&texture_data,
-		TextureFormat::Rgba8UnormSrgb,
-		RenderAssetUsages::all(),
-	);
 
 	// Generate indices
 	for z in 0..grid_height {
@@ -369,14 +396,43 @@ fn generate_terrain_mesh(
 		}
 	}
 
-	let mesh = Mesh::new(
+	Mesh::new(
 		PrimitiveTopology::TriangleList,
 		RenderAssetUsages::RENDER_WORLD,
 	)
 	.with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
 	.with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals_calculated)
 	.with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
-	.with_inserted_indices(Indices::U32(indices));
+	.with_inserted_indices(Indices::U32(indices))
+}
 
-	(mesh, img)
+fn generate_texture_from_height_map(
+	height_map: &HeightMap,
+	grid_width: u32,
+	grid_height: u32,
+) -> Image {
+	let mut texture_data = Vec::with_capacity(((grid_width + 1) * (grid_height + 1) * 4) as usize);
+
+	// Generate texture data from height map
+	for z in 0..=grid_height {
+		for x in 0..=grid_width {
+			let height = height_map.get(x, z);
+			let normalized_height = (height).max(0.0).min(1.0);
+			let pixel_value = (normalized_height * 255.0) as u8;
+
+			texture_data.extend_from_slice(&[pixel_value, pixel_value, pixel_value, 255]);
+		}
+	}
+
+	Image::new_fill(
+		Extent3d {
+			width: grid_width + 1,
+			height: grid_height + 1,
+			depth_or_array_layers: 1,
+		},
+		TextureDimension::D2,
+		&texture_data,
+		TextureFormat::Rgba8UnormSrgb,
+		RenderAssetUsages::all(),
+	)
 }
