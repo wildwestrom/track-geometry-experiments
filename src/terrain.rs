@@ -225,18 +225,18 @@ impl HeightMap {
 	}
 }
 
-fn generate_height_map(grid_width: u32, grid_height: u32, params: &NoiseConfig) -> HeightMap {
+fn generate_height_map(grid_length: u32, grid_width: u32, params: &NoiseConfig) -> HeightMap {
 	let noise = OpenSimplex::new(params.seed);
-	let mut height_map = HeightMap::new(grid_width, grid_height);
+	let mut height_map = HeightMap::new(grid_length, grid_width);
 
 	// Values for normalization
 	let mut min_height = f32::INFINITY;
 	let mut max_height = f32::NEG_INFINITY;
 
-	for z in 0..=grid_height {
-		for x in 0..=grid_width {
-			let x_pos = (x as f32 / grid_width as f32) - 0.5;
-			let z_pos = (z as f32 / grid_height as f32) - 0.5;
+	for z in 0..=grid_width {
+		for x in 0..=grid_length {
+			let x_pos = (x as f32 / grid_length as f32) - 0.5;
+			let z_pos = (z as f32 / grid_width as f32) - 0.5;
 
 			let height = calculate_height_at_position(x_pos, z_pos, params, &noise);
 			height_map.set(x, z, height);
@@ -249,8 +249,8 @@ fn generate_height_map(grid_width: u32, grid_height: u32, params: &NoiseConfig) 
 	// Normalize all values to 0-1 range
 	let height_range = max_height - min_height;
 	if height_range > 0.0 {
-		for z in 0..=grid_height {
-			for x in 0..=grid_width {
+		for z in 0..=grid_width {
+			for x in 0..=grid_length {
 				let height = height_map.get(x, z);
 				let normalized_height = (height - min_height) / height_range;
 				height_map.set(x, z, normalized_height);
@@ -297,8 +297,8 @@ fn calculate_height_at_position(
 
 fn generate_mesh_from_height_map(
 	height_map: &HeightMap,
+	grid_length: u32,
 	grid_width: u32,
-	grid_height: u32,
 	world_length: f32,
 	world_width: f32,
 	height_multiplier: f32,
@@ -307,42 +307,36 @@ fn generate_mesh_from_height_map(
 	let mut uvs = Vec::new();
 	let mut indices = Vec::new();
 
-	let length_step = world_length / grid_width as f32;
-	let width_step = world_width / grid_height as f32;
+	let length_step = world_length / grid_length as f32;
+	let width_step = world_width / grid_width as f32;
 
 	// Generate vertices
-	for z in 0..=grid_height {
-		for x in 0..=grid_width {
+	for z in 0..=grid_width {
+		for x in 0..=grid_length {
 			let x_pos = (x as f32 * length_step) - world_length / 2.0;
 			let z_pos = (z as f32 * width_step) - world_width / 2.0;
 			let y_pos = height_map.get(x, z) * height_multiplier;
 
 			positions.push([x_pos, y_pos, z_pos]);
-			uvs.push([x as f32 / grid_width as f32, z as f32 / grid_height as f32]);
+			uvs.push([x as f32 / grid_length as f32, z as f32 / grid_width as f32]);
 		}
 	}
 
-	// Generate indices
-	for z in 0..grid_height {
-		for x in 0..grid_width {
-			let top_left = z * (grid_width + 1) + x;
-			let top_right = top_left + 1;
-			let bottom_left = (z + 1) * (grid_width + 1) + x;
-			let bottom_right = bottom_left + 1;
+	// Generate triangle indices
+	for z in 0..grid_width {
+		for x in 0..grid_length {
+			let current = z * (grid_length + 1) + x;
+			let next_x = current + 1;
+			let next_z = (z + 1) * (grid_length + 1) + x;
+			let next_both = next_z + 1;
 
-			// First triangle
-			indices.push(top_left);
-			indices.push(bottom_left);
-			indices.push(top_right);
-
-			// Second triangle
-			indices.push(top_right);
-			indices.push(bottom_left);
-			indices.push(bottom_right);
+			// First triangle (counter-clockwise winding)
+			indices.extend_from_slice(&[current, next_z, next_x]);
+			// Second triangle (counter-clockwise winding)
+			indices.extend_from_slice(&[next_x, next_z, next_both]);
 		}
 	}
 
-	// Create mesh and let Bevy compute normals automatically
 	Mesh::new(
 		PrimitiveTopology::TriangleList,
 		RenderAssetUsages::RENDER_WORLD,
@@ -355,13 +349,13 @@ fn generate_mesh_from_height_map(
 
 fn generate_texture_from_height_map(
 	height_map: &HeightMap,
+	grid_length: u32,
 	grid_width: u32,
-	grid_height: u32,
 ) -> Image {
-	let mut texture_data = Vec::with_capacity(((grid_width + 1) * (grid_height + 1) * 4) as usize);
+	let mut texture_data = Vec::with_capacity(((grid_length + 1) * (grid_width + 1) * 4) as usize);
 
-	for z in 0..=grid_height {
-		for x in 0..=grid_width {
+	for z in 0..=grid_width {
+		for x in 0..=grid_length {
 			let height = height_map.get(x, z);
 			let pixel_value = (height * 255.0) as u8;
 			texture_data.extend_from_slice(&[pixel_value, pixel_value, pixel_value, 255]);
@@ -370,8 +364,8 @@ fn generate_texture_from_height_map(
 
 	Image::new_fill(
 		Extent3d {
-			width: grid_width + 1,
-			height: grid_height + 1,
+			width: grid_length + 1,
+			height: grid_width + 1,
 			depth_or_array_layers: 1,
 		},
 		TextureDimension::D2,
