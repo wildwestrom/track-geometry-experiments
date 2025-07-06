@@ -478,8 +478,9 @@ fn generate_texture_from_height_map(
 ) -> Image {
 	let mut texture_data = Vec::with_capacity(((grid_length + 1) * (grid_width + 1) * 4) as usize);
 
-	for z in 0..=grid_width {
-		for x in 0..=grid_length {
+	// Rotate the texture 90 degrees counterclockwise to match the top-down view
+	for x in 0..=grid_length {
+		for z in (0..=grid_width).rev() {
 			let height = height_map.get(x, z);
 			let pixel_value = (height * 255.0) as u8;
 			texture_data.extend_from_slice(&[pixel_value, pixel_value, pixel_value, 255]);
@@ -488,8 +489,8 @@ fn generate_texture_from_height_map(
 
 	Image::new_fill(
 		Extent3d {
-			width: grid_length + 1,
-			height: grid_width + 1,
+			width: grid_width + 1,
+			height: grid_length + 1,
 			depth_or_array_layers: 1,
 		},
 		TextureDimension::D2,

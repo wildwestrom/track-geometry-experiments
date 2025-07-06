@@ -7,7 +7,7 @@ use bevy::{
 	},
 };
 use bevy_egui::EguiPlugin;
-use bevy_tweening::{lens::*, *};
+use bevy_tweening::*;
 use std::f32::consts::PI;
 
 mod hud;
@@ -96,16 +96,12 @@ fn main() {
 }
 
 fn setup(mut commands: Commands) {
-	let persp_angled = Projection::from(PerspectiveProjection {
-		fov: PI / 4.0,
-		far: 10000.0,
-		..default()
-	});
+	let (transform, projection) = create_perspective_camera_state();
 
 	// Spawn single main camera
 	commands.spawn((
-		Transform::from_translation(Vec3::new(0.0, 1000.0, 1200.0)).looking_at(Vec3::ZERO, Vec3::Y),
-		persp_angled,
+		transform,
+		projection,
 		Camera3d::default(),
 		Camera {
 			order: 0,
@@ -245,23 +241,14 @@ fn handle_projection_changes(
 
 fn get_camera_state(state: CameraState) -> (Transform, Projection) {
 	match state {
-		CameraState::PerspectiveAngled => {
-			let transform = Transform::from_translation(Vec3::new(0.0, 1000.0, 1200.0))
-				.looking_at(Vec3::ZERO, Vec3::Y);
-			let projection = Projection::from(PerspectiveProjection {
-				fov: PI / 4.0,
-				far: 10000.0,
-				..default()
-			});
-			(transform, projection)
-		}
+		CameraState::PerspectiveAngled => create_perspective_camera_state(),
 		CameraState::OrthographicTopDown => {
 			let transform = Transform::from_translation(Vec3::new(0.0, 1200.0, 0.0))
 				.looking_at(Vec3::ZERO, Vec3::Y);
 			let projection = Projection::from(OrthographicProjection {
 				scale: 1.0,
 				near: 0.1,
-				far: 3000.0,
+				far: 10000.0,
 				viewport_origin: Vec2::new(0.5, 0.5),
 				scaling_mode: ScalingMode::FixedVertical {
 					viewport_height: 1000.0,
@@ -271,4 +258,15 @@ fn get_camera_state(state: CameraState) -> (Transform, Projection) {
 			(transform, projection)
 		}
 	}
+}
+
+fn create_perspective_camera_state() -> (Transform, Projection) {
+	let transform =
+		Transform::from_translation(Vec3::new(1000.0, 1000.0, 1200.0)).looking_at(Vec3::ZERO, Vec3::Y);
+	let projection = Projection::from(PerspectiveProjection {
+		fov: PI / 4.0,
+		far: 10000.0,
+		..default()
+	});
+	(transform, projection)
 }
