@@ -240,6 +240,51 @@ fn ui_system(mut contexts: EguiContexts, mut settings: ResMut<Settings>) {
 	}
 }
 
+
+fn setup_terrain(
+	mut commands: Commands,
+	mut meshes: ResMut<Assets<Mesh>>,
+	mut materials: ResMut<Assets<StandardMaterial>>,
+	mut images: ResMut<Assets<Image>>,
+	settings: Res<Settings>,
+) {
+	// Generate height map once
+	let grid_size = settings.terrain.grid_size();
+	let height_map = HeightMap::new(grid_size, grid_size, &settings.noise);
+
+	let terrain_mesh = generate_mesh_from_height_map(
+		&height_map,
+		grid_size,
+		grid_size,
+		settings.terrain.world_width(),
+		settings.terrain.world_length(),
+		settings.terrain.height_multiplier,
+	);
+	let noise_texture = generate_texture_from_height_map(&height_map, grid_size, grid_size);
+	let terrain_handle = meshes.add(terrain_mesh);
+	let noise_handle = images.add(noise_texture);
+
+	commands.spawn((
+		Mesh3d(terrain_handle),
+		MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
+		TerrainMesh,
+	));
+
+	commands.spawn((
+		ImageNode::new(noise_handle),
+		NoiseTexture,
+		Node {
+			justify_self: JustifySelf::End,
+			align_self: AlignSelf::Start,
+			width: Val::Px(256.0),
+			height: Val::Px(256.0),
+			padding: UiRect::all(Val::Px(10.0)),
+			..default()
+		},
+	));
+}
+
+
 fn update_terrain(
 	mut noise_texture_query: Query<&mut ImageNode, With<NoiseTexture>>,
 	mut images: ResMut<Assets<Image>>,
@@ -250,7 +295,7 @@ fn update_terrain(
 	// Only update if settings have changed
 	if settings.is_changed() {
 		let grid_size = settings.terrain.grid_size();
-		let height_map = generate_height_map(grid_size, grid_size, &settings.noise);
+		let height_map = HeightMap::new(grid_size, grid_size, &settings.noise);
 		if let Ok(mut image_node) = noise_texture_query.single_mut() {
 			let new_texture = generate_texture_from_height_map(&height_map, grid_size, grid_size);
 			let new_texture_handle = images.add(new_texture);
@@ -279,11 +324,49 @@ struct HeightMap {
 }
 
 impl HeightMap {
-	fn new(width: u32, height: u32) -> Self {
-		Self {
-			width,
-			heights: vec![0.0; ((width + 1) * (height + 1)) as usize],
+	fn new(grid_length: u32, grid_width: u32, params: &NoiseConfig) -> Self {
+		// Create noise objects for each octave once
+		let mut octave_noises = Vec::new();
+		for octave in 0..params.octaves {
+			let octave_seed = params.seed.wrapping_add(octave as u32);
+			octave_noises.push(OpenSimplex::new(octave_seed));
 		}
+
+		let mut height_map = Self {
+			width: grid_width,
+			heights: vec![0.0; ((grid_width + 1) * (grid_length + 1)) as usize],
+		};
+
+		// Values for normalization
+		let mut min_height = f32::INFINITY;
+		let mut max_height = f32::NEG_INFINITY;
+
+		for z in 0..=grid_width {
+			for x in 0..=grid_length {
+				let x_pos = (x as f32 / grid_length as f32) - 0.5;
+				let z_pos = (z as f32 / grid_width as f32) - 0.5;
+
+				let height = calculate_height_at_position(x_pos, z_pos, params, &octave_noises);
+				height_map.set(x, z, height);
+
+				min_height = min_height.min(height);
+				max_height = max_height.max(height);
+			}
+		}
+
+		// Normalize all values to 0-1 range
+		let height_range = max_height - min_height;
+		if height_range > 0.0 {
+			for z in 0..=grid_width {
+				for x in 0..=grid_length {
+					let height = height_map.get(x, z);
+					let normalized_height = (height - min_height) / height_range;
+					height_map.set(x, z, normalized_height);
+				}
+			}
+		}
+
+		height_map
 	}
 
 	fn get(&self, x: u32, z: u32) -> f32 {
@@ -295,48 +378,6 @@ impl HeightMap {
 		let index = (z * (self.width + 1) + x) as usize;
 		self.heights[index] = height;
 	}
-}
-
-fn generate_height_map(grid_length: u32, grid_width: u32, params: &NoiseConfig) -> HeightMap {
-	// Create noise objects for each octave once
-	let mut octave_noises = Vec::new();
-	for octave in 0..params.octaves {
-		let octave_seed = params.seed.wrapping_add(octave as u32);
-		octave_noises.push(OpenSimplex::new(octave_seed));
-	}
-
-	let mut height_map = HeightMap::new(grid_length, grid_width);
-
-	// Values for normalization
-	let mut min_height = f32::INFINITY;
-	let mut max_height = f32::NEG_INFINITY;
-
-	for z in 0..=grid_width {
-		for x in 0..=grid_length {
-			let x_pos = (x as f32 / grid_length as f32) - 0.5;
-			let z_pos = (z as f32 / grid_width as f32) - 0.5;
-
-			let height = calculate_height_at_position(x_pos, z_pos, params, &octave_noises);
-			height_map.set(x, z, height);
-
-			min_height = min_height.min(height);
-			max_height = max_height.max(height);
-		}
-	}
-
-	// Normalize all values to 0-1 range
-	let height_range = max_height - min_height;
-	if height_range > 0.0 {
-		for z in 0..=grid_width {
-			for x in 0..=grid_length {
-				let height = height_map.get(x, z);
-				let normalized_height = (height - min_height) / height_range;
-				height_map.set(x, z, normalized_height);
-			}
-		}
-	}
-
-	height_map
 }
 
 fn calculate_height_at_position(
@@ -460,47 +501,4 @@ fn generate_texture_from_height_map(
 		TextureFormat::Rgba8UnormSrgb,
 		RenderAssetUsages::all(),
 	)
-}
-
-fn setup_terrain(
-	mut commands: Commands,
-	mut meshes: ResMut<Assets<Mesh>>,
-	mut materials: ResMut<Assets<StandardMaterial>>,
-	mut images: ResMut<Assets<Image>>,
-	settings: Res<Settings>,
-) {
-	// Generate height map once
-	let grid_size = settings.terrain.grid_size();
-	let height_map = generate_height_map(grid_size, grid_size, &settings.noise);
-
-	let terrain_mesh = generate_mesh_from_height_map(
-		&height_map,
-		grid_size,
-		grid_size,
-		settings.terrain.world_width(),
-		settings.terrain.world_length(),
-		settings.terrain.height_multiplier,
-	);
-	let noise_texture = generate_texture_from_height_map(&height_map, grid_size, grid_size);
-	let terrain_handle = meshes.add(terrain_mesh);
-	let noise_handle = images.add(noise_texture);
-
-	commands.spawn((
-		Mesh3d(terrain_handle),
-		MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
-		TerrainMesh,
-	));
-
-	commands.spawn((
-		ImageNode::new(noise_handle),
-		NoiseTexture,
-		Node {
-			justify_self: JustifySelf::End,
-			align_self: AlignSelf::Start,
-			width: Val::Px(256.0),
-			height: Val::Px(256.0),
-			padding: UiRect::all(Val::Px(10.0)),
-			..default()
-		},
-	));
 }
