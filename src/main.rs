@@ -14,6 +14,7 @@ use noise::{NoiseFn, OpenSimplex};
 use std::f32::consts::PI;
 
 mod hud;
+use hud::CameraDebugHud;
 
 #[derive(Resource)]
 struct NoiseParameters {
@@ -66,7 +67,7 @@ fn main() {
 		}))
 		.add_plugins(PanOrbitCameraPlugin)
 		.add_plugins(EguiPlugin::default())
-		//.add_plugins(CameraDebugHud)
+		.add_plugins(CameraDebugHud)
 		.insert_resource(NoiseParameters::default())
 		.add_systems(Startup, setup)
 		.add_systems(Update, update_terrain_mesh)
