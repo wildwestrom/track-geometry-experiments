@@ -32,16 +32,16 @@ struct NoiseParameters {
 impl Default for NoiseParameters {
 	fn default() -> Self {
 		Self {
-			seed: 42,
+			seed: 0,
 			offset_x: 0.0,
 			offset_y: 0.0,
-			scale: 0.15,
-			octaves: 4,
-			persistence: 0.5,
+			scale: 0.75,
+			octaves: 8,
+			persistence: 0.4,
 			lacunarity: 2.0,
-			valley_exponent: 1.0,
-			fudge_factor: 1.2,
-			terrain_height: 2.0,
+			valley_exponent: 6.0,
+			fudge_factor: 1.15,
+			terrain_height: 1.0,
 		}
 	}
 }
@@ -53,6 +53,7 @@ struct NoiseTexture;
 struct TerrainMesh;
 
 const NOISE_MAX: f64 = 0.544;
+const TERRAIN_SIZE: u32 = 512;
 
 fn main() {
 	App::new()
@@ -80,8 +81,8 @@ fn setup(
 	mut images: ResMut<Assets<Image>>,
 	noise_params: Res<NoiseParameters>,
 ) {
-	// Create terrain mesh
-	let (terrain_mesh, noise_texture) = generate_terrain_mesh(64, 64, 5.0, 5.0, &noise_params);
+	let (terrain_mesh, noise_texture) =
+		generate_terrain_mesh(TERRAIN_SIZE, TERRAIN_SIZE, 5.0, 5.0, &noise_params);
 	let terrain_handle = meshes.add(terrain_mesh);
 	let noise_handle = images.add(noise_texture);
 
@@ -123,8 +124,8 @@ fn setup(
 			Node {
 				justify_self: JustifySelf::End,
 				align_self: AlignSelf::Start,
-				width: Val::Px(256.0),
-				height: Val::Px(256.0),
+				width: Val::Px(128.0),
+				height: Val::Px(128.0),
 				padding: UiRect::all(Val::Px(10.0)),
 				..default()
 			},
@@ -149,19 +150,19 @@ fn ui_system(mut contexts: EguiContexts, mut noise_params: ResMut<NoiseParameter
 			ui.label("Offset X:");
 			ui.add(
 				egui::Slider::new(&mut noise_params.offset_x, -1000.0..=1000.0)
-					.step_by(1.0)
+					.step_by(0.0)
 					.text("Offset X"),
 			);
 
 			ui.label("Offset Y:");
 			ui.add(
 				egui::Slider::new(&mut noise_params.offset_y, -1000.0..=1000.0)
-					.step_by(1.0)
+					.step_by(0.0)
 					.text("Offset Y"),
 			);
 
 			ui.label("Scale:");
-			ui.add(egui::Slider::new(&mut noise_params.scale, 0.01..=0.5).text("Scale"));
+			ui.add(egui::Slider::new(&mut noise_params.scale, 0.01..=1.5).text("Scale"));
 
 			ui.label("Octaves:");
 			ui.add(
@@ -171,7 +172,7 @@ fn ui_system(mut contexts: EguiContexts, mut noise_params: ResMut<NoiseParameter
 			);
 
 			ui.label("Persistence:");
-			ui.add(egui::Slider::new(&mut noise_params.persistence, 0.1..=0.6).text("Persistence"));
+			ui.add(egui::Slider::new(&mut noise_params.persistence, 0.0..=1.0).text("Persistence"));
 
 			ui.label("Lacunarity:");
 			ui.add(egui::Slider::new(&mut noise_params.lacunarity, 1.01..=4.0).text("Lacunarity"));
@@ -209,24 +210,24 @@ fn update_terrain_mesh(
 	mut meshes: ResMut<Assets<Mesh>>,
 	noise_params: Res<NoiseParameters>,
 ) {
-	if let Ok(mut mesh_3d) = terrain_query.single_mut() {
-		let (new_terrain_mesh, new_texture) =
-			generate_terrain_mesh(64, 64, 5.0, 5.0, &noise_params);
-		let new_mesh_handle = meshes.add(new_terrain_mesh);
-		*mesh_3d = Mesh3d(new_mesh_handle);
+		if let Ok(mut mesh_3d) = terrain_query.single_mut() {
+			let (new_terrain_mesh, new_texture) =
+				generate_terrain_mesh(TERRAIN_SIZE, TERRAIN_SIZE, 5.0, 5.0, &noise_params);
+			let new_mesh_handle = meshes.add(new_terrain_mesh);
+			*mesh_3d = Mesh3d(new_mesh_handle);
 
-		if let Ok(mut image_node) = noise_texture_query.single_mut() {
-			let new_texture_handle = images.add(new_texture);
-			*image_node = ImageNode::new(new_texture_handle);
-		}
+			if let Ok(mut image_node) = noise_texture_query.single_mut() {
+				let new_texture_handle = images.add(new_texture);
+				*image_node = ImageNode::new(new_texture_handle);
+			}
 	}
 }
 
 fn generate_terrain_mesh(
-	width_segments: u32,
-	height_segments: u32,
-	width: f32,
-	height: f32,
+	grid_width: u32,
+	grid_height: u32,
+	world_width: f32,
+	world_height: f32,
 	params: &NoiseParameters,
 ) -> (Mesh, Image) {
 	let noise = OpenSimplex::new(params.seed);
@@ -235,17 +236,17 @@ fn generate_terrain_mesh(
 	let mut uvs = Vec::new();
 	let mut indices = Vec::new();
 
-	let width_step = width / width_segments as f32;
-	let height_step = height / height_segments as f32;
+	let width_step = world_width / grid_width as f32;
+	let height_step = world_height / grid_height as f32;
 
 	let mut texture_data =
-		Vec::with_capacity(((width_segments + 1) * (height_segments + 1) * 4) as usize);
+		Vec::with_capacity(((grid_width + 1) * (grid_height + 1) * 4) as usize);
 
 	// Generate vertices
-	for z in 0..=height_segments {
-		for x in 0..=width_segments {
-			let x_pos = (x as f32 * width_step) - width / 2.0;
-			let z_pos = (z as f32 * height_step) - height / 2.0;
+	for z in 0..=grid_height {
+		for x in 0..=grid_width {
+			let x_pos = (x as f32 * width_step) - world_width / 2.0;
+			let z_pos = (z as f32 * height_step) - world_height / 2.0;
 
 			// Generate height using the same noise function
 			let mut amplitude = 1.0_f64;
@@ -274,23 +275,20 @@ fn generate_terrain_mesh(
 
 			let pixel_value = (valley_value * 255.0) as u8;
 
-			texture_data.push(pixel_value); // R
-			texture_data.push(pixel_value); // G
-			texture_data.push(pixel_value); // B
-			texture_data.push(255); // A
+			texture_data.extend_from_slice(&[pixel_value, pixel_value, pixel_value, 255]);
 
 			positions.push([x_pos, y_pos, z_pos]);
 			normals.push([0.0, 1.0, 0.0]); // Will be recalculated
 			uvs.push([
-				x as f32 / width_segments as f32,
-				z as f32 / height_segments as f32,
+				x as f32 / grid_width as f32,
+				z as f32 / grid_height as f32,
 			]);
 		}
 	}
 	let img = Image::new_fill(
 		Extent3d {
-			width: width_segments + 1,
-			height: height_segments + 1,
+			width: grid_width + 1,
+			height: grid_height + 1,
 			depth_or_array_layers: 1,
 		},
 		TextureDimension::D2,
@@ -300,11 +298,11 @@ fn generate_terrain_mesh(
 	);
 
 	// Generate indices
-	for z in 0..height_segments {
-		for x in 0..width_segments {
-			let top_left = z * (width_segments + 1) + x;
+	for z in 0..grid_height {
+		for x in 0..grid_width {
+			let top_left = z * (grid_width + 1) + x;
 			let top_right = top_left + 1;
-			let bottom_left = (z + 1) * (width_segments + 1) + x;
+			let bottom_left = (z + 1) * (grid_width + 1) + x;
 			let bottom_right = bottom_left + 1;
 
 			// First triangle

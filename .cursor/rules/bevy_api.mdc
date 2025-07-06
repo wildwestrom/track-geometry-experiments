@@ -1,0 +1,48 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Bevy API Rule
+
+**ALWAYS verify Bevy API usage against the official documentation before suggesting code.**
+
+## Key Points:
+- Bevy's API changes frequently between versions
+- Current project uses Bevy 0.16.1
+- Check https://docs.rs/bevy/0.16.1/bevy/ for accurate API reference
+- Don't assume struct names, function signatures, or component types
+- Verify imports, system parameters, and component definitions
+- When unsure about API usage, search the documentation first
+
+## Common Issues to Avoid:
+- Using outdated component names (e.g., `NodeBundle` vs `Node`, `Query::get_single_mut()`, `Query::single_mut()`)
+- Incorrect system parameter types
+- Wrong import paths
+- Non-existent functions or methods
+- Incorrect enum variants
+
+## An example
+
+Previously:
+
+```
+commands.spawn(MaterialMesh2dBundle {
+    mesh: meshes.add(Circle::new(100.0)).into(),
+    material: materials.add(Color::srgb(7.5, 0.0, 7.5)),
+    transform: Transform::from_translation(Vec3::new(-200., 0., 0.)),
+    ..default()
+});
+```
+
+Now:
+
+```
+commands.spawn((
+    Mesh2d(meshes.add(Circle::new(100.0))),
+    MeshMaterial2d(materials.add(Color::srgb(7.5, 0.0, 7.5))),
+    Transform::from_translation(Vec3::new(-200., 0., 0.)),
+));
+```
+
+**Rule: Before suggesting any Bevy-related code, verify the exact API in the 0.16.1 documentation.** 

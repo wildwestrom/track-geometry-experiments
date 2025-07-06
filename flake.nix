@@ -56,17 +56,20 @@
 
                   cargo-watch
                   cargo-flamegraph
+                  tracy-wayland
                 ];
 
                 # Set up environment variables for Bevy/Wayland
-                env.LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
-                  pkgs.libxkbcommon
-                  pkgs.libGL
-                  pkgs.vulkan-loader
-                  pkgs.wayland
-                  pkgs.alsa-lib
-                  pkgs.libudev-zero
-                ];
+                env.LD_LIBRARY_PATH =
+                  with pkgs;
+                  lib.makeLibraryPath [
+                    libxkbcommon
+                    libGL
+                    vulkan-loader
+                    wayland
+                    alsa-lib
+                    libudev-zero
+                  ];
               }
             ];
           };

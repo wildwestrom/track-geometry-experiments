@@ -1,12 +1,12 @@
 [package]
-name = "track_geometry"
+name = "terrain_gen"
 version = "0.1.0"
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bevy = {version = "0.16.1", default-features = true, features = [
+bevy = {version = "0.16.1", default-features = false, features = [
   "bevy_pbr",
   "bevy_text",
   "bevy_winit",
@@ -55,3 +55,9 @@ inherits = "release"
 opt-level = "s"
 # Strip all debugging information from the binary to slightly reduce file size.
 strip = "debuginfo"
+
+# Profile for performance analysis with cargo-flamegraph
+[profile.perf]
+inherits = "release"
+# Enable debug symbols for profiling while keeping full optimizations
+debug = true
