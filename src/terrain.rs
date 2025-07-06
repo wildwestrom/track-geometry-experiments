@@ -16,6 +16,8 @@ use std::path::Path;
 
 pub struct TerrainPlugin;
 
+const WORLD_SIZE: f32 = 1000.0;
+
 impl Plugin for TerrainPlugin {
 	fn build(&self, app: &mut App) {
 		app.insert_resource(load_settings())
@@ -75,15 +77,13 @@ fn load_settings() -> Settings {
 
 #[derive(Serialize, Deserialize, Clone)]
 struct TerrainConfig {
-	world_size: f32,
 	resolution_multiplier: u32,
 	height_multiplier: f32,
 }
 
 impl PartialEq for TerrainConfig {
 	fn eq(&self, other: &Self) -> bool {
-		self.world_size.to_bits() == other.world_size.to_bits()
-			&& self.resolution_multiplier == other.resolution_multiplier
+		self.resolution_multiplier == other.resolution_multiplier
 			&& self.height_multiplier.to_bits() == other.height_multiplier.to_bits()
 	}
 }
@@ -94,18 +94,17 @@ impl TerrainConfig {
 	}
 
 	fn world_width(&self) -> f32 {
-		self.world_size
+		WORLD_SIZE
 	}
 
 	fn world_length(&self) -> f32 {
-		self.world_size
+		WORLD_SIZE
 	}
 }
 
 impl Default for TerrainConfig {
 	fn default() -> Self {
 		Self {
-			world_size: 15.0,
 			resolution_multiplier: 8, // This gives us 64 grid cells (16 * 4)
 			height_multiplier: 3.4,
 		}
@@ -177,14 +176,13 @@ fn ui_system(mut contexts: EguiContexts, mut settings: ResMut<Settings>) {
 				settings.terrain.grid_size()
 			));
 
-			ui.label("World Size:");
-			ui.add(egui::Slider::new(&mut settings.terrain.world_size, 1.0..=20.0).step_by(0.5));
+			ui.label(&format!("World Size: {:.1} (fixed)", WORLD_SIZE));
 
 			ui.label("Height Multiplier:");
-			ui.add(egui::Slider::new(
-				&mut settings.terrain.height_multiplier,
-				0.1..=5.0,
-			));
+			ui.add(
+				egui::Slider::new(&mut settings.terrain.height_multiplier, 0.0..=1000.0)
+					.step_by(1.0),
+			);
 
 			ui.separator();
 			ui.label("Noise Parameters:");

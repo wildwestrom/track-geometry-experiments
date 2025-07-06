@@ -33,7 +33,7 @@ fn main() {
 
 fn setup(mut commands: Commands) {
 	commands.spawn((
-		Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
+		Transform::from_translation(Vec3::new(0.0, 1000.0, 1200.0)),
 		bevy_panorbit_camera::PanOrbitCamera::default(),
 	));
 	commands.spawn((
