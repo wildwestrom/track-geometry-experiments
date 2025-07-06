@@ -304,7 +304,6 @@ fn generate_mesh_from_height_map(
 	height_multiplier: f32,
 ) -> Mesh {
 	let mut positions = Vec::new();
-	let mut normals = Vec::new();
 	let mut uvs = Vec::new();
 	let mut indices = Vec::new();
 
@@ -319,7 +318,6 @@ fn generate_mesh_from_height_map(
 			let y_pos = height_map.get(x, z) * height_multiplier;
 
 			positions.push([x_pos, y_pos, z_pos]);
-			normals.push([0.0, 1.0, 0.0]); // Will be recalculated
 			uvs.push([x as f32 / grid_width as f32, z as f32 / grid_height as f32]);
 		}
 	}
@@ -344,67 +342,15 @@ fn generate_mesh_from_height_map(
 		}
 	}
 
-	// Calculate normals
-	let mut normals_calculated = vec![[0.0, 0.0, 0.0]; positions.len()];
-	let mut normal_counts = vec![0; positions.len()];
-
-	// First pass: calculate face normals and accumulate them
-	for chunk in indices.chunks(3) {
-		if chunk.len() == 3 {
-			let i0 = chunk[0] as usize;
-			let i1 = chunk[1] as usize;
-			let i2 = chunk[2] as usize;
-
-			let v0 = Vec3::from(positions[i0]);
-			let v1 = Vec3::from(positions[i1]);
-			let v2 = Vec3::from(positions[i2]);
-
-			let edge1 = v1 - v0;
-			let edge2 = v2 - v0;
-			let face_normal = edge1.cross(edge2);
-
-			// Add this face normal to all three vertices
-			normals_calculated[i0][0] += face_normal.x;
-			normals_calculated[i0][1] += face_normal.y;
-			normals_calculated[i0][2] += face_normal.z;
-			normal_counts[i0] += 1;
-
-			normals_calculated[i1][0] += face_normal.x;
-			normals_calculated[i1][1] += face_normal.y;
-			normals_calculated[i1][2] += face_normal.z;
-			normal_counts[i1] += 1;
-
-			normals_calculated[i2][0] += face_normal.x;
-			normals_calculated[i2][1] += face_normal.y;
-			normals_calculated[i2][2] += face_normal.z;
-			normal_counts[i2] += 1;
-		}
-	}
-
-	// Second pass: normalize the accumulated normals
-	for i in 0..normals_calculated.len() {
-		if normal_counts[i] > 0 {
-			let normal = Vec3::new(
-				normals_calculated[i][0],
-				normals_calculated[i][1],
-				normals_calculated[i][2],
-			);
-			let normalized = normal.normalize();
-			normals_calculated[i] = [normalized.x, normalized.y, normalized.z];
-		} else {
-			// Fallback for vertices not used in any triangle
-			normals_calculated[i] = [0.0, 1.0, 0.0];
-		}
-	}
-
+	// Create mesh and let Bevy compute normals automatically
 	Mesh::new(
 		PrimitiveTopology::TriangleList,
 		RenderAssetUsages::RENDER_WORLD,
 	)
 	.with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-	.with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals_calculated)
 	.with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
 	.with_inserted_indices(Indices::U32(indices))
+	.with_computed_normals()
 }
 
 fn generate_texture_from_height_map(
