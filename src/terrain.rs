@@ -1,3 +1,4 @@
+use anyhow::Result;
 use bevy::{
 	asset::RenderAssetUsages,
 	prelude::*,
@@ -12,7 +13,6 @@ use noise::{NoiseFn, OpenSimplex};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-use anyhow::Result;
 
 pub struct TerrainPlugin;
 
@@ -105,9 +105,9 @@ impl TerrainConfig {
 impl Default for TerrainConfig {
 	fn default() -> Self {
 		Self {
-			world_size: 5.0,
-			resolution_multiplier: 4, // This gives us 64 grid cells (16 * 4)
-			height_multiplier: 1.0,
+			world_size: 15.0,
+			resolution_multiplier: 8, // This gives us 64 grid cells (16 * 4)
+			height_multiplier: 3.4,
 		}
 	}
 }
@@ -122,6 +122,7 @@ struct NoiseConfig {
 	persistence: f32,
 	lacunarity: f32,
 	valley_exponent: f32,
+	height_roughness: f32,
 }
 
 impl PartialEq for NoiseConfig {
@@ -134,6 +135,7 @@ impl PartialEq for NoiseConfig {
 			&& self.persistence.to_bits() == other.persistence.to_bits()
 			&& self.lacunarity.to_bits() == other.lacunarity.to_bits()
 			&& self.valley_exponent.to_bits() == other.valley_exponent.to_bits()
+			&& self.height_roughness.to_bits() == other.height_roughness.to_bits()
 	}
 }
 
@@ -143,11 +145,12 @@ impl Default for NoiseConfig {
 			seed: 0,
 			offset_x: 0.0,
 			offset_z: 0.0,
-			scale: 2.5,
+			scale: 3.8,
 			octaves: 8,
-			persistence: 0.4,
-			lacunarity: 2.0,
-			valley_exponent: 1.0,
+			persistence: 0.18,
+			lacunarity: 2.3,
+			valley_exponent: 10.5,
+			height_roughness: 1.9,
 		}
 	}
 }
@@ -216,7 +219,13 @@ fn ui_system(mut contexts: EguiContexts, mut settings: ResMut<Settings>) {
 			ui.label("Valley Exponent:");
 			ui.add(egui::Slider::new(
 				&mut settings.noise.valley_exponent,
-				0.0..=10.0,
+				0.0..=20.0,
+			));
+
+			ui.label("Height Roughness:");
+			ui.add(egui::Slider::new(
+				&mut settings.noise.height_roughness,
+				0.0..=5.0,
 			));
 
 			ui.separator();
@@ -352,7 +361,16 @@ fn calculate_height_at_position(
 		height += raw_noise_sample * amplitude;
 		max_height += amplitude;
 
-		amplitude *= params.persistence as f64;
+		// Calculate height-dependent persistence
+		// Convert current height to 0-1 range for the height roughness calculation
+		let current_height_normalized = (height / max_height + 1.0) * 0.5;
+
+		// Apply height roughness: higher elevations get more roughness (higher persistence)
+		// The height_roughness parameter controls how much the height affects persistence
+		let height_factor = 1.0 + (current_height_normalized * params.height_roughness as f64);
+		let dynamic_persistence = params.persistence as f64 * height_factor;
+
+		amplitude *= dynamic_persistence;
 		frequency *= params.lacunarity as f64;
 	}
 
