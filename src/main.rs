@@ -17,6 +17,37 @@ mod hud;
 use hud::CameraDebugHud;
 
 #[derive(Resource)]
+struct TerrainConfig {
+	world_size: f32,
+	resolution_multiplier: u32,
+	height_multiplier: f32,
+}
+
+impl TerrainConfig {
+	fn grid_size(&self) -> u32 {
+		(16.0 * self.resolution_multiplier as f32) as u32
+	}
+
+	fn world_width(&self) -> f32 {
+		self.world_size
+	}
+
+	fn world_length(&self) -> f32 {
+		self.world_size
+	}
+}
+
+impl Default for TerrainConfig {
+	fn default() -> Self {
+		Self {
+			world_size: 5.0,
+			resolution_multiplier: 4, // This gives us 64 grid cells (16 * 4)
+			height_multiplier: 1.0,
+		}
+	}
+}
+
+#[derive(Resource)]
 struct NoiseParameters {
 	seed: u32,
 	offset_x: f32,
@@ -26,8 +57,6 @@ struct NoiseParameters {
 	persistence: f32,
 	lacunarity: f32,
 	valley_exponent: f32,
-	// This is only for the mesh height, everything else is normalized
-	terrain_height: f32,
 }
 
 impl Default for NoiseParameters {
@@ -36,12 +65,11 @@ impl Default for NoiseParameters {
 			seed: 0,
 			offset_x: 0.0,
 			offset_z: 0.0,
-			scale: 0.75,
+			scale: 2.5,
 			octaves: 8,
 			persistence: 0.4,
 			lacunarity: 2.0,
-			valley_exponent: 6.0,
-			terrain_height: 1.0,
+			valley_exponent: 1.0,
 		}
 	}
 }
@@ -51,9 +79,6 @@ struct NoiseTexture;
 
 #[derive(Component)]
 struct TerrainMesh;
-
-const NOISE_MAX: f64 = 0.544;
-const TERRAIN_SIZE: u32 = 64;
 
 fn main() {
 	App::new()
@@ -67,6 +92,7 @@ fn main() {
 		.add_plugins(PanOrbitCameraPlugin)
 		.add_plugins(EguiPlugin::default())
 		.add_plugins(CameraDebugHud)
+		.insert_resource(TerrainConfig::default())
 		.insert_resource(NoiseParameters::default())
 		.add_systems(Startup, setup)
 		.add_systems(Update, update_terrain_mesh)
@@ -80,19 +106,21 @@ fn setup(
 	mut materials: ResMut<Assets<StandardMaterial>>,
 	mut images: ResMut<Assets<Image>>,
 	noise_params: Res<NoiseParameters>,
+	terrain_config: Res<TerrainConfig>,
 ) {
 	// Generate height map once
-	let height_map = generate_height_map(TERRAIN_SIZE, TERRAIN_SIZE, &noise_params);
+	let grid_size = terrain_config.grid_size();
+	let height_map = generate_height_map(grid_size, grid_size, &noise_params);
 
 	let terrain_mesh = generate_mesh_from_height_map(
 		&height_map,
-		TERRAIN_SIZE,
-		TERRAIN_SIZE,
-		5.0,
-		5.0,
-		noise_params.terrain_height,
+		grid_size,
+		grid_size,
+		terrain_config.world_width(),
+		terrain_config.world_length(),
+		terrain_config.height_multiplier,
 	);
-	let noise_texture = generate_texture_from_height_map(&height_map, TERRAIN_SIZE, TERRAIN_SIZE);
+	let noise_texture = generate_texture_from_height_map(&height_map, grid_size, grid_size);
 	let terrain_handle = meshes.add(terrain_mesh);
 	let noise_handle = images.add(noise_texture);
 
@@ -141,59 +169,63 @@ fn setup(
 	));
 }
 
-fn ui_system(mut contexts: EguiContexts, mut noise_params: ResMut<NoiseParameters>) {
+fn ui_system(
+	mut contexts: EguiContexts,
+	mut noise_params: ResMut<NoiseParameters>,
+	mut terrain_config: ResMut<TerrainConfig>,
+) {
 	if let Ok(ctx) = contexts.ctx_mut() {
-		egui::Window::new("Noise Controls").show(ctx, |ui| {
+		egui::Window::new("Terrain Controls").show(ctx, |ui| {
+			ui.label("Terrain Configuration:");
+			ui.label("World Size:");
+			ui.add(egui::Slider::new(&mut terrain_config.world_size, 1.0..=20.0).step_by(0.5));
+
+			ui.label("Resolution Multiplier:");
+			ui.add(
+				egui::Slider::new(&mut terrain_config.resolution_multiplier, 1..=8).step_by(1.0),
+			);
+
+			ui.label(&format!(
+				"Grid Size: {}x{}",
+				terrain_config.grid_size(),
+				terrain_config.grid_size()
+			));
+
+			ui.label("Height Multiplier:");
+			ui.add(egui::Slider::new(
+				&mut terrain_config.height_multiplier,
+				0.1..=5.0,
+			));
+
+			ui.separator();
+			ui.label("Noise Parameters:");
+
 			ui.label("Seed:");
 			ui.add(egui::DragValue::new(&mut noise_params.seed).speed(1.0));
 
 			ui.label("Offset X:");
-			ui.add(
-				egui::Slider::new(&mut noise_params.offset_x, -10.0..=10.0)
-					.step_by(0.1)
-					.text("Offset X"),
-			);
+			ui.add(egui::Slider::new(&mut noise_params.offset_x, -10.0..=10.0).step_by(0.1));
 
 			ui.label("Offset Z:");
-			ui.add(
-				egui::Slider::new(&mut noise_params.offset_z, -10.0..=10.0)
-					.step_by(0.1)
-					.text("Offset Z"),
-			);
+			ui.add(egui::Slider::new(&mut noise_params.offset_z, -10.0..=10.0).step_by(0.1));
 
 			ui.label("Scale:");
-			ui.add(egui::Slider::new(&mut noise_params.scale, 0.01..=10.0).text("Scale"));
+			ui.add(egui::Slider::new(&mut noise_params.scale, 0.01..=10.0));
 
 			ui.label("Octaves:");
-			ui.add(
-				egui::Slider::new(&mut noise_params.octaves, 1..=8)
-					.text("Octaves")
-					.step_by(1.0),
-			);
+			ui.add(egui::Slider::new(&mut noise_params.octaves, 1..=8).step_by(1.0));
 
 			ui.label("Persistence:");
-			ui.add(egui::Slider::new(&mut noise_params.persistence, 0.0..=1.0).text("Persistence"));
+			ui.add(egui::Slider::new(&mut noise_params.persistence, 0.0..=1.0));
 
 			ui.label("Lacunarity:");
-			ui.add(egui::Slider::new(&mut noise_params.lacunarity, 1.01..=4.0).text("Lacunarity"));
-
-			ui.separator();
-			ui.label("Valley Controls:");
+			ui.add(egui::Slider::new(&mut noise_params.lacunarity, 1.01..=4.0));
 
 			ui.label("Valley Exponent:");
-			ui.add(
-				egui::Slider::new(&mut noise_params.valley_exponent, 0.0..=10.0)
-					.text("Valley Exponent"),
-			);
-
-			ui.separator();
-			ui.label("Terrain Controls:");
-
-			ui.label("Terrain Height:");
-			ui.add(
-				egui::Slider::new(&mut noise_params.terrain_height, 0.1..=5.0)
-					.text("Terrain Height"),
-			);
+			ui.add(egui::Slider::new(
+				&mut noise_params.valley_exponent,
+				0.0..=10.0,
+			));
 		});
 	}
 }
@@ -204,24 +236,25 @@ fn update_terrain_mesh(
 	mut terrain_query: Query<&mut Mesh3d, With<TerrainMesh>>,
 	mut meshes: ResMut<Assets<Mesh>>,
 	noise_params: Res<NoiseParameters>,
+	terrain_config: Res<TerrainConfig>,
 ) {
 	if let Ok(mut mesh_3d) = terrain_query.single_mut() {
 		if let Ok(mut image_node) = noise_texture_query.single_mut() {
-			let height_map = generate_height_map(TERRAIN_SIZE, TERRAIN_SIZE, &noise_params);
+			let grid_size = terrain_config.grid_size();
+			let height_map = generate_height_map(grid_size, grid_size, &noise_params);
 
 			let new_terrain_mesh = generate_mesh_from_height_map(
 				&height_map,
-				TERRAIN_SIZE,
-				TERRAIN_SIZE,
-				5.0,
-				5.0,
-				noise_params.terrain_height,
+				grid_size,
+				grid_size,
+				terrain_config.world_width(),
+				terrain_config.world_length(),
+				terrain_config.height_multiplier,
 			);
 			let new_mesh_handle = meshes.add(new_terrain_mesh);
 			*mesh_3d = Mesh3d(new_mesh_handle);
 
-			let new_texture =
-				generate_texture_from_height_map(&height_map, TERRAIN_SIZE, TERRAIN_SIZE);
+			let new_texture = generate_texture_from_height_map(&height_map, grid_size, grid_size);
 			let new_texture_handle = images.add(new_texture);
 			*image_node = ImageNode::new(new_texture_handle);
 		}
@@ -314,7 +347,7 @@ fn calculate_height_at_position(
 		let sample_z =
 			(z_pos as f64 * params.scale as f64 * frequency) + (params.offset_z as f64 * frequency);
 
-		let raw_noise_sample = (noise.get([sample_x, sample_z]) / NOISE_MAX).clamp(-1.0, 1.0);
+		let raw_noise_sample = noise.get([sample_x, sample_z]);
 		height += raw_noise_sample * amplitude;
 		max_height += amplitude;
 
@@ -334,24 +367,24 @@ fn generate_mesh_from_height_map(
 	height_map: &HeightMap,
 	grid_width: u32,
 	grid_height: u32,
+	world_length: f32,
 	world_width: f32,
-	world_height: f32,
-	terrain_height: f32,
+	height_multiplier: f32,
 ) -> Mesh {
 	let mut positions = Vec::new();
 	let mut normals = Vec::new();
 	let mut uvs = Vec::new();
 	let mut indices = Vec::new();
 
-	let width_step = world_width / grid_width as f32;
-	let height_step = world_height / grid_height as f32;
+	let length_step = world_length / grid_width as f32;
+	let width_step = world_width / grid_height as f32;
 
 	// Generate vertices
 	for z in 0..=grid_height {
 		for x in 0..=grid_width {
-			let x_pos = (x as f32 * width_step) - world_width / 2.0;
-			let z_pos = (z as f32 * height_step) - world_height / 2.0;
-			let y_pos = height_map.get(x, z) * terrain_height;
+			let x_pos = (x as f32 * length_step) - world_length / 2.0;
+			let z_pos = (z as f32 * width_step) - world_width / 2.0;
+			let y_pos = height_map.get(x, z) * height_multiplier;
 
 			positions.push([x_pos, y_pos, z_pos]);
 			normals.push([0.0, 1.0, 0.0]); // Will be recalculated

@@ -3176,12 +3176,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
-name = "opensimplex_noise_rs"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba77c545f2291bb66897afe90c8583c4fdc427fae9cb552db032e74d7526e8b5"
-
-[[package]]
 name = "orbclient"
 version = "0.3.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3965,7 +3959,6 @@ dependencies = [
  "bevy_panorbit_camera",
  "log",
  "noise",
- "opensimplex_noise_rs",
 ]
 
 [[package]]
