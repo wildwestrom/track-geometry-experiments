@@ -114,8 +114,6 @@ fn ui_system(
 	if let Ok(ctx) = contexts.ctx_mut() {
 		egui::Window::new("Terrain Controls").show(ctx, |ui| {
 			ui.label("Terrain Configuration:");
-			ui.label("World Size:");
-			ui.add(egui::Slider::new(&mut terrain_config.world_size, 1.0..=20.0).step_by(0.5));
 
 			ui.label("Resolution Multiplier:");
 			ui.add(
@@ -127,6 +125,9 @@ fn ui_system(
 				terrain_config.grid_size(),
 				terrain_config.grid_size()
 			));
+
+			ui.label("World Size:");
+			ui.add(egui::Slider::new(&mut terrain_config.world_size, 1.0..=20.0).step_by(0.5));
 
 			ui.label("Height Multiplier:");
 			ui.add(egui::Slider::new(
@@ -226,7 +227,13 @@ impl HeightMap {
 }
 
 fn generate_height_map(grid_length: u32, grid_width: u32, params: &NoiseConfig) -> HeightMap {
-	let noise = OpenSimplex::new(params.seed);
+	// Create noise objects for each octave once
+	let mut octave_noises = Vec::new();
+	for octave in 0..params.octaves {
+		let octave_seed = params.seed.wrapping_add(octave as u32);
+		octave_noises.push(OpenSimplex::new(octave_seed));
+	}
+
 	let mut height_map = HeightMap::new(grid_length, grid_width);
 
 	// Values for normalization
@@ -238,7 +245,7 @@ fn generate_height_map(grid_length: u32, grid_width: u32, params: &NoiseConfig) 
 			let x_pos = (x as f32 / grid_length as f32) - 0.5;
 			let z_pos = (z as f32 / grid_width as f32) - 0.5;
 
-			let height = calculate_height_at_position(x_pos, z_pos, params, &noise);
+			let height = calculate_height_at_position(x_pos, z_pos, params, &octave_noises);
 			height_map.set(x, z, height);
 
 			min_height = min_height.min(height);
@@ -265,7 +272,7 @@ fn calculate_height_at_position(
 	x_pos: f32,
 	z_pos: f32,
 	params: &NoiseConfig,
-	noise: &OpenSimplex,
+	noise_octaves: &[OpenSimplex],
 ) -> f32 {
 	let mut amplitude = 1.0_f64;
 	let mut frequency = 1.0_f64;
@@ -273,13 +280,13 @@ fn calculate_height_at_position(
 	let mut max_height = 0.0_f64;
 
 	// Generate fractal noise using multiple octaves
-	for _ in 0..params.octaves {
+	for octave in noise_octaves.iter() {
 		let sample_x =
 			(x_pos as f64 * params.scale as f64 * frequency) + (params.offset_x as f64 * frequency);
 		let sample_z =
 			(z_pos as f64 * params.scale as f64 * frequency) + (params.offset_z as f64 * frequency);
 
-		let raw_noise_sample = noise.get([sample_x, sample_z]);
+		let raw_noise_sample = octave.get([sample_x, sample_z]);
 		height += raw_noise_sample * amplitude;
 		max_height += amplitude;
 
