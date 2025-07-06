@@ -240,7 +240,6 @@ fn ui_system(mut contexts: EguiContexts, mut settings: ResMut<Settings>) {
 	}
 }
 
-
 fn setup_terrain(
 	mut commands: Commands,
 	mut meshes: ResMut<Assets<Mesh>>,
@@ -283,7 +282,6 @@ fn setup_terrain(
 		},
 	));
 }
-
 
 fn update_terrain(
 	mut noise_texture_query: Query<&mut ImageNode, With<NoiseTexture>>,
