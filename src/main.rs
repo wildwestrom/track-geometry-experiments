@@ -48,7 +48,7 @@ impl Default for TerrainConfig {
 }
 
 #[derive(Resource)]
-struct NoiseParameters {
+struct NoiseConfig {
 	seed: u32,
 	offset_x: f32,
 	offset_z: f32,
@@ -59,7 +59,7 @@ struct NoiseParameters {
 	valley_exponent: f32,
 }
 
-impl Default for NoiseParameters {
+impl Default for NoiseConfig {
 	fn default() -> Self {
 		Self {
 			seed: 0,
@@ -93,7 +93,7 @@ fn main() {
 		.add_plugins(EguiPlugin::default())
 		.add_plugins(CameraDebugHud)
 		.insert_resource(TerrainConfig::default())
-		.insert_resource(NoiseParameters::default())
+		.insert_resource(NoiseConfig::default())
 		.add_systems(Startup, setup)
 		.add_systems(Update, update_terrain_mesh)
 		.add_systems(bevy_egui::EguiPrimaryContextPass, ui_system)
@@ -105,12 +105,12 @@ fn setup(
 	mut meshes: ResMut<Assets<Mesh>>,
 	mut materials: ResMut<Assets<StandardMaterial>>,
 	mut images: ResMut<Assets<Image>>,
-	noise_params: Res<NoiseParameters>,
+	noise_config: Res<NoiseConfig>,
 	terrain_config: Res<TerrainConfig>,
 ) {
 	// Generate height map once
 	let grid_size = terrain_config.grid_size();
-	let height_map = generate_height_map(grid_size, grid_size, &noise_params);
+	let height_map = generate_height_map(grid_size, grid_size, &noise_config);
 
 	let terrain_mesh = generate_mesh_from_height_map(
 		&height_map,
@@ -171,7 +171,7 @@ fn setup(
 
 fn ui_system(
 	mut contexts: EguiContexts,
-	mut noise_params: ResMut<NoiseParameters>,
+	mut noise_params: ResMut<NoiseConfig>,
 	mut terrain_config: ResMut<TerrainConfig>,
 ) {
 	if let Ok(ctx) = contexts.ctx_mut() {
@@ -235,7 +235,7 @@ fn update_terrain_mesh(
 	mut images: ResMut<Assets<Image>>,
 	mut terrain_query: Query<&mut Mesh3d, With<TerrainMesh>>,
 	mut meshes: ResMut<Assets<Mesh>>,
-	noise_params: Res<NoiseParameters>,
+	noise_params: Res<NoiseConfig>,
 	terrain_config: Res<TerrainConfig>,
 ) {
 	if let Ok(mut mesh_3d) = terrain_query.single_mut() {
@@ -286,7 +286,7 @@ impl HeightMap {
 	}
 }
 
-fn generate_height_map(grid_width: u32, grid_height: u32, params: &NoiseParameters) -> HeightMap {
+fn generate_height_map(grid_width: u32, grid_height: u32, params: &NoiseConfig) -> HeightMap {
 	let noise = OpenSimplex::new(params.seed);
 	let mut height_map = HeightMap::new(grid_width, grid_height);
 
@@ -332,7 +332,7 @@ fn generate_height_map(grid_width: u32, grid_height: u32, params: &NoiseParamete
 fn calculate_height_at_position(
 	x_pos: f32,
 	z_pos: f32,
-	params: &NoiseParameters,
+	params: &NoiseConfig,
 	noise: &OpenSimplex,
 ) -> f32 {
 	let mut amplitude = 1.0_f64;
