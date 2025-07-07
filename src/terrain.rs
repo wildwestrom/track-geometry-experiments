@@ -7,7 +7,7 @@ use bevy::{
 		render_resource::{Extent3d, TextureDimension, TextureFormat},
 	},
 };
-use bevy_egui::{EguiContexts, egui};
+use bevy_egui::{egui, EguiContexts};
 use log::{error, info};
 use noise::{NoiseFn, OpenSimplex};
 use serde::{Deserialize, Serialize};
