@@ -16,7 +16,7 @@ use std::path::Path;
 
 pub struct TerrainPlugin;
 
-const WORLD_SIZE: f32 = 1000.0;
+pub const WORLD_SIZE: f32 = 1000.0;
 
 impl Plugin for TerrainPlugin {
 	fn build(&self, app: &mut App) {

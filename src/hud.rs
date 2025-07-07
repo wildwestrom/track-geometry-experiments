@@ -36,28 +36,44 @@ fn setup_hud(mut commands: Commands) {
 }
 
 fn update_hud(
-	camera_query: Query<&Transform, With<MainCamera>>,
+	camera_query: Query<(&Transform, &Projection), With<MainCamera>>,
 	mut hud_query: Query<&mut Text, With<HudText>>,
 ) {
 	if let Ok(camera_transform) = camera_query.single() {
 		if let Ok(mut hud_text) = hud_query.single_mut() {
-			let translation = camera_transform.translation;
-			let rotation = camera_transform.rotation;
+			let translation = camera_transform.0.translation;
+			let rotation = camera_transform.0.rotation;
 
 			// Convert rotation to euler angles for display
-			let euler = rotation.to_euler(EulerRot::YXZ);
+			let euler = rotation.to_euler(EulerRot::XYZ);
 
-			*hud_text = Text::new(format!(
-				"Camera Transform:\n\
+			*hud_text = if let Projection::Perspective(persp) = camera_transform.1 {
+				Text::new(format!(
+					"Camera Transform:\n\
+            Position: ({:.2}, {:.2}, {:.2})\n\
+            Rotation: ({:.2}, {:.2}, {:.2}) deg\n\
+			FOV: {:.2} deg",
+					translation.x,
+					translation.y,
+					translation.z,
+					euler.0.to_degrees(),
+					euler.1.to_degrees(),
+					euler.2.to_degrees(),
+					persp.fov.to_degrees()
+				))
+			} else {
+				Text::new(format!(
+					"Camera Transform:\n\
             Position: ({:.2}, {:.2}, {:.2})\n\
             Rotation: ({:.2}, {:.2}, {:.2}) deg",
-				translation.x,
-				translation.y,
-				translation.z,
-				euler.0.to_degrees(),
-				euler.1.to_degrees(),
-				euler.2.to_degrees()
-			));
+					translation.x,
+					translation.y,
+					translation.z,
+					euler.0.to_degrees(),
+					euler.1.to_degrees(),
+					euler.2.to_degrees()
+				))
+			};
 		}
 	}
 }

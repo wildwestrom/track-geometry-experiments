@@ -2,7 +2,6 @@ use bevy::{
 	prelude::*,
 	render::{
 		RenderPlugin,
-		camera::ScalingMode,
 		settings::{WgpuFeatures, WgpuSettings},
 	},
 };
@@ -14,6 +13,7 @@ mod hud;
 use hud::CameraDebugHud;
 mod terrain;
 use terrain::TerrainPlugin;
+use terrain::WORLD_SIZE;
 
 #[derive(Resource, Default)]
 struct CameraMode {
@@ -22,7 +22,7 @@ struct CameraMode {
 	transition_timer: Timer,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum CameraState {
 	PerspectiveAngled,
 	OrthographicTopDown,
@@ -46,25 +46,45 @@ impl CameraState {
 #[derive(Component)]
 struct MainCamera;
 
-#[derive(Component)]
-struct DelayedProjectionChange {
-	timer: Timer,
-	camera_entity: Entity,
-	target_projection: Projection,
+#[derive(Debug, Clone, Copy)]
+struct DollyZoomLens {
+	start_fov: f32,
+	end_fov: f32,
+	start_rot: Quat,
+	end_rot: Quat,
+}
+
+const PADDING: f32 = 500.0;
+
+impl Lens<Transform> for DollyZoomLens {
+	fn lerp(&mut self, target: &mut dyn Targetable<Transform>, ratio: f32) {
+		let fov = self.start_fov + (self.end_fov - self.start_fov) * ratio;
+		let distance = dolly_zoom_distance(WORLD_SIZE + PADDING, fov);
+		// let distance = self.start_distance + (self.end_distance - self.start_distance) * ratio;
+		let rot = self.start_rot.slerp(self.end_rot, ratio);
+		let direction = rot * Vec3::Z;
+		if let Some(transform) = target.as_any_mut().downcast_mut::<Transform>() {
+			*transform = Transform {
+				translation: direction * distance,
+				rotation: rot,
+				scale: Vec3::ONE,
+			};
+		}
+	}
 }
 
 #[derive(Debug, Clone, Copy)]
-struct TransformLerpLens {
-	start: Transform,
-	end: Transform,
+struct ProjectionFovLens {
+	start: f32,
+	end: f32,
 }
 
-impl Lens<Transform> for TransformLerpLens {
-	fn lerp(&mut self, target: &mut dyn Targetable<Transform>, ratio: f32) {
-		if let Some(transform) = target.as_any_mut().downcast_mut::<Transform>() {
-			transform.translation = self.start.translation.lerp(self.end.translation, ratio);
-			transform.rotation = self.start.rotation.slerp(self.end.rotation, ratio);
-			transform.scale = self.start.scale.lerp(self.end.scale, ratio);
+impl Lens<Projection> for ProjectionFovLens {
+	fn lerp(&mut self, target: &mut dyn Targetable<Projection>, ratio: f32) {
+		if let Some(projection) = target.as_any_mut().downcast_mut::<Projection>() {
+			if let Projection::Perspective(persp) = projection {
+				persp.fov = self.start + (self.end - self.start) * ratio;
+			}
 		}
 	}
 }
@@ -84,24 +104,20 @@ fn main() {
 		.add_plugins(TerrainPlugin)
 		.insert_resource(CameraMode::default())
 		.add_systems(Startup, setup)
+		.add_systems(Update, (toggle_camera, cleanup_completed_tweens))
 		.add_systems(
 			Update,
-			(
-				toggle_camera,
-				cleanup_completed_tweens,
-				handle_projection_changes,
-			),
+			bevy_tweening::component_animator_system::<Projection>,
 		)
 		.run();
 }
 
 fn setup(mut commands: Commands) {
-	let (transform, projection) = create_perspective_camera_state();
+	let (transform, perspective) = create_perspective_angled_state();
 
-	// Spawn single main camera
 	commands.spawn((
 		transform,
-		projection,
+		Projection::from(perspective),
 		Camera3d::default(),
 		Camera {
 			order: 0,
@@ -132,6 +148,16 @@ fn setup(mut commands: Commands) {
 	));
 }
 
+// Here's how the state transition works:
+// Whenever the user presses the toggle key, the camera will transition to the next state.
+// Perspective → Orthographic: Animate FOV to a very small value and move the camera to a top-down position in a single tween.
+// Orthographic → Perspective: Animate FOV to the angled value and move the camera to the angled position in a single tween.
+// There is no explicit orthographic projection anymore; everything is handled with perspective projection and FOV/transform tweening.
+
+// Transition timing constants
+const TOTAL_TRANSITION_TIME: f32 = 1.0;
+const CLOSE_TO_ORTHOGRAPHIC_FOV: f32 = 1e-3;
+
 fn toggle_camera(
 	keyboard_input: Res<ButtonInput<KeyCode>>,
 	mut camera_mode: ResMut<CameraMode>,
@@ -139,63 +165,90 @@ fn toggle_camera(
 	camera_query: Query<(Entity, &Transform, &Projection), With<MainCamera>>,
 ) {
 	if keyboard_input.just_pressed(KeyCode::KeyT) && !camera_mode.is_transitioning {
-		if let Ok((camera_entity, current_transform, _current_projection)) = camera_query.single() {
+		if let Ok((camera_entity, current_transform, current_projection)) = camera_query.single() {
 			let new_mode = camera_mode.current_mode.next();
 			camera_mode.is_transitioning = true;
-			camera_mode.transition_timer = Timer::from_seconds(1.0, TimerMode::Once);
 
-			// Get target camera state
-			let (target_transform, target_projection) = get_camera_state(new_mode);
+			camera_mode.transition_timer =
+				Timer::from_seconds(TOTAL_TRANSITION_TIME, TimerMode::Once);
 
 			match (camera_mode.current_mode, new_mode) {
-				// Perspective → Orthographic: Transform first, then change projection
+				// Perspective → Orthographic: 1-stage transition
 				(CameraState::PerspectiveAngled, CameraState::OrthographicTopDown) => {
-					// Create tween for transform transition
+					let end_fov = CLOSE_TO_ORTHOGRAPHIC_FOV;
+					let start_fov = if let Projection::Perspective(p) = current_projection {
+						p.fov
+					} else {
+						panic!("Expected perspective projection");
+					};
+					let start_rot = current_transform.rotation;
+					let end_rot = Quat::from_euler(
+						EulerRot::XYZ,
+						-90.0_f32.to_radians(),
+						0.0_f32.to_radians(),
+						90.0_f32.to_radians(),
+					);
 					let transform_tween = Tween::new(
 						EaseFunction::SmoothStep,
-						std::time::Duration::from_secs_f32(0.8),
-						TransformLerpLens {
-							start: *current_transform,
-							end: target_transform,
+						std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
+						DollyZoomLens {
+							start_fov,
+							end_fov,
+							start_rot,
+							end_rot,
 						},
 					);
-
-					// Add tween component to camera
+					let fov_tween = Tween::new(
+						EaseFunction::SmoothStep,
+						std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
+						ProjectionFovLens {
+							start: start_fov,
+							end: end_fov,
+						},
+					);
 					commands
 						.entity(camera_entity)
-						.insert(Animator::new(transform_tween));
-
-					// Schedule projection change after transform completes
-					commands.spawn(DelayedProjectionChange {
-						timer: Timer::from_seconds(0.8, TimerMode::Once),
-						camera_entity,
-						target_projection,
-					});
+						.insert(Animator::new(transform_tween))
+						.insert(Animator::new(fov_tween));
 				}
-				// Orthographic → Perspective: Change projection first, then transform
+				// Orthographic → Perspective: 1-stage transition
 				(CameraState::OrthographicTopDown, CameraState::PerspectiveAngled) => {
-					// Change projection immediately using commands
-					commands.entity(camera_entity).insert(target_projection);
-
-					// Create tween for transform transition
+					let (_, angled_projection) = create_perspective_angled_state();
+					let start_fov = if let Projection::Perspective(p) = current_projection {
+						p.fov
+					} else {
+						panic!("Expected perspective projection");
+					};
+					let end_fov = angled_projection.fov;
+					let start_rot = current_transform.rotation;
+					let end_transform = create_perspective_angled_state().0;
+					let end_rot = end_transform.rotation;
 					let transform_tween = Tween::new(
 						EaseFunction::SmoothStep,
-						std::time::Duration::from_secs_f32(0.8),
-						TransformLerpLens {
-							start: *current_transform,
-							end: target_transform,
+						std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
+						DollyZoomLens {
+							start_fov,
+							end_fov,
+							start_rot,
+							end_rot,
 						},
 					);
-
-					// Add tween component to camera
+					let fov_tween = Tween::new(
+						EaseFunction::SmoothStep,
+						std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
+						ProjectionFovLens {
+							start: start_fov,
+							end: end_fov,
+						},
+					);
 					commands
 						.entity(camera_entity)
-						.insert(Animator::new(transform_tween));
+						.insert(Animator::new(transform_tween))
+						.insert(Animator::new(fov_tween));
 				}
 				_ => unreachable!(),
 			}
 
-			// Update camera mode
 			camera_mode.current_mode = new_mode;
 		}
 	}
@@ -205,68 +258,44 @@ fn cleanup_completed_tweens(
 	time: Res<Time>,
 	mut commands: Commands,
 	mut camera_mode: ResMut<CameraMode>,
-	camera_query: Query<(Entity, &mut Animator<Transform>), With<MainCamera>>,
+	camera_query: Query<Entity, With<MainCamera>>,
 ) {
 	if camera_mode.is_transitioning {
 		camera_mode.transition_timer.tick(time.delta());
 		if camera_mode.transition_timer.finished() {
-			if let Ok((camera_entity, _animator)) = camera_query.single() {
-				// Remove the animator component
+			if let Ok(camera_entity) = camera_query.single() {
+				// Remove the animator components
 				commands
 					.entity(camera_entity)
 					.remove::<Animator<Transform>>();
+				commands
+					.entity(camera_entity)
+					.remove::<Animator<Projection>>();
 				camera_mode.is_transitioning = false;
 			}
 		}
 	}
 }
 
-fn handle_projection_changes(
-	time: Res<Time>,
-	mut commands: Commands,
-	mut delayed_changes: Query<(Entity, &mut DelayedProjectionChange)>,
-) {
-	for (entity, mut delayed_change) in delayed_changes.iter_mut() {
-		delayed_change.timer.tick(time.delta());
-		if delayed_change.timer.finished() {
-			// Apply the projection change using commands
-			commands
-				.entity(delayed_change.camera_entity)
-				.insert(delayed_change.target_projection.clone());
-			// Remove the delayed change component
-			commands.entity(entity).despawn();
-		}
-	}
+fn create_perspective_angled_state() -> (Transform, PerspectiveProjection) {
+	let fov = 60.0_f32.to_radians();
+	// Desired camera position at 60deg FOV, looking from a diagonal angle
+	let distance = dolly_zoom_distance(WORLD_SIZE + PADDING, fov);
+	let initial_angle = Vec3::ONE;
+	let angled_pos = initial_angle.normalize() * distance;
+	let transform = Transform::from_translation(angled_pos).looking_at(Vec3::ZERO, Vec3::Y);
+	let projection = create_perspective_projection(fov);
+	(transform, projection)
 }
 
-fn get_camera_state(state: CameraState) -> (Transform, Projection) {
-	match state {
-		CameraState::PerspectiveAngled => create_perspective_camera_state(),
-		CameraState::OrthographicTopDown => {
-			let transform = Transform::from_translation(Vec3::new(0.0, 1200.0, 0.0))
-				.looking_at(Vec3::ZERO, Vec3::Y);
-			let projection = Projection::from(OrthographicProjection {
-				scale: 1.0,
-				near: 0.1,
-				far: 10000.0,
-				viewport_origin: Vec2::new(0.5, 0.5),
-				scaling_mode: ScalingMode::FixedVertical {
-					viewport_height: 1000.0,
-				},
-				area: Rect::new(-1.0, -1.0, 1.0, 1.0),
-			});
-			(transform, projection)
-		}
-	}
+fn dolly_zoom_distance(width: f32, fov: f32) -> f32 {
+	width / (2.0 * (0.5 * fov).tan())
 }
 
-fn create_perspective_camera_state() -> (Transform, Projection) {
-	let transform =
-		Transform::from_translation(Vec3::new(1000.0, 1000.0, 1200.0)).looking_at(Vec3::ZERO, Vec3::Y);
-	let projection = Projection::from(PerspectiveProjection {
-		fov: PI / 4.0,
+fn create_perspective_projection(fov: f32) -> PerspectiveProjection {
+	PerspectiveProjection {
+		fov,
 		far: 10000.0,
 		..default()
-	});
-	(transform, projection)
+	}
 }
