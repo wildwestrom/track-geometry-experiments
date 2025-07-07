@@ -44,21 +44,21 @@ fn update_hud(
 			let rotation = camera_transform.0.rotation;
 
 			// Convert rotation to euler angles for display
-			let euler = rotation.to_euler(EulerRot::XYZ);
+			let euler_yxz = rotation.to_euler(EulerRot::YXZ);
 
 			*hud_text = if let Projection::Perspective(persp) = camera_transform.1 {
 				Text::new(format!(
 					"Camera Transform:\n\
             Position: ({:.2}, {:.2}, {:.2})\n\
-            Rotation: ({:.2}, {:.2}, {:.2}) deg\n\
+			Rotation YXZ: ({:.2}, {:.2}, {:.2}) deg\n\
 			Rotation Quat: ({:.2}, {:.2}, {:.2}, {:.2})\n\
 			FOV: {:.2} deg",
 					translation.x,
 					translation.y,
 					translation.z,
-					euler.0.to_degrees(),
-					euler.1.to_degrees(),
-					euler.2.to_degrees(),
+					euler_yxz.0.to_degrees(),
+					euler_yxz.1.to_degrees(),
+					euler_yxz.2.to_degrees(),
 					rotation.x,
 					rotation.y,
 					rotation.z,
@@ -69,14 +69,14 @@ fn update_hud(
 				Text::new(format!(
 					"Camera Transform:\n\
             Position: ({:.2}, {:.2}, {:.2})\n\
-            Rotation: ({:.2}, {:.2}, {:.2}) deg\n\
+            Rotation YXZ: ({:.2}, {:.2}, {:.2}) deg\n\
 			Rotation Quat: ({:.2}, {:.2}, {:.2}, {:.2})",
 					translation.x,
 					translation.y,
 					translation.z,
-					euler.0.to_degrees(),
-					euler.1.to_degrees(),
-					euler.2.to_degrees(),
+					euler_yxz.0.to_degrees(),
+					euler_yxz.1.to_degrees(),
+					euler_yxz.2.to_degrees(),
 					rotation.x,
 					rotation.y,
 					rotation.z,

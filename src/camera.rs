@@ -228,12 +228,8 @@ fn toggle_camera(
 						panic!("Expected perspective projection");
 					};
 					let start_rot = current_transform.rotation;
-					let end_rot = Quat::from_euler(
-						EulerRot::XYZ,
-						-90.0_f32.to_radians(),
-						0.0_f32.to_radians(),
-						90.0_f32.to_radians(),
-					);
+					let end_rot = Quat::from_axis_angle(Vec3::Y, 90.0_f32.to_radians())
+						* Quat::from_axis_angle(Vec3::X, -89.9_f32.to_radians());
 					// Calculate current camera's effective size from its position and FOV
 					let current_distance = current_transform.translation.length();
 					let current_size = dolly_zoom_width(current_distance, start_fov);
