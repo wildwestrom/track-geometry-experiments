@@ -79,18 +79,18 @@ impl Lens<PanOrbitCamera> for PanOrbitCameraLens {
 		let fov = self.start_fov + (self.end_fov - self.start_fov) * ratio;
 		let size = self.start_size + (self.end_size - self.start_size) * ratio;
 		let distance = dolly_zoom_distance(size, fov);
-		let rot = self.start_rot.slerp(self.end_rot, ratio);
-		let direction = rot * Vec3::Z;
 
-		// Calculate the camera position
-		let translation = direction * distance;
+		// Calculate start and end spherical coordinates directly from rotations
+		let start_direction = self.start_rot * Vec3::Z;
+		let end_direction = self.end_rot * Vec3::Z;
 
-		// Use the calculate_from_translation_and_focus function to get internal state
-		let (yaw, pitch, radius) = calculate_from_translation_and_focus(
-			translation,
-			Vec3::ZERO,                  // focus point
-			[Vec3::X, Vec3::Y, Vec3::Z], // axis
-		);
+		let (start_yaw, start_pitch) = direction_to_spherical(start_direction);
+		let (end_yaw, end_pitch) = direction_to_spherical(end_direction);
+
+		// Interpolate spherical coordinates directly
+		let yaw = start_yaw + (end_yaw - start_yaw) * ratio;
+		let pitch = start_pitch + (end_pitch - start_pitch) * ratio;
+		let radius = distance;
 
 		if let Some(pan_orbit_camera) = target.as_any_mut().downcast_mut::<PanOrbitCamera>() {
 			pan_orbit_camera.yaw = Some(yaw);
@@ -105,22 +105,11 @@ impl Lens<PanOrbitCamera> for PanOrbitCameraLens {
 	}
 }
 
-// Helper function to calculate internal state from transform
-fn calculate_from_translation_and_focus(
-	translation: Vec3,
-	focus: Vec3,
-	axis: [Vec3; 3],
-) -> (f32, f32, f32) {
-	let axis = Mat3::from_cols(axis[0], axis[1], axis[2]);
-	let comp_vec = translation - focus;
-	let mut radius = comp_vec.length();
-	if radius == 0.0 {
-		radius = 0.05; // Radius 0 causes problems
-	}
-	let comp_vec = axis * comp_vec;
-	let yaw = comp_vec.x.atan2(comp_vec.z);
-	let pitch = (comp_vec.y / radius).asin();
-	(yaw, pitch, radius)
+// Helper function to convert direction vector to spherical coordinates
+fn direction_to_spherical(direction: Vec3) -> (f32, f32) {
+	let yaw = direction.x.atan2(direction.z);
+	let pitch = (direction.y / direction.length()).asin();
+	(yaw, pitch)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -148,7 +137,14 @@ impl Plugin for CameraPlugin {
 			.add_plugins(CameraDebugHud)
 			.insert_resource(CameraMode::default())
 			.add_systems(Startup, setup)
-			.add_systems(Update, (toggle_camera, cleanup_completed_tweens))
+			.add_systems(
+				Update,
+				(
+					toggle_camera,
+					cleanup_completed_tweens,
+					disable_camera_during_transition,
+				),
+			)
 			.add_systems(
 				Update,
 				bevy_tweening::component_animator_system::<Projection>,
@@ -365,6 +361,15 @@ fn cleanup_completed_tweens(
 				camera_mode.is_transitioning = false;
 			}
 		}
+	}
+}
+
+fn disable_camera_during_transition(
+	camera_mode: Res<CameraMode>,
+	mut camera_query: Query<&mut PanOrbitCamera>,
+) {
+	if let Ok(mut camera) = camera_query.single_mut() {
+		camera.enabled = !camera_mode.is_transitioning;
 	}
 }
 

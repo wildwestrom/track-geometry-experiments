@@ -51,6 +51,7 @@ fn update_hud(
 					"Camera Transform:\n\
             Position: ({:.2}, {:.2}, {:.2})\n\
             Rotation: ({:.2}, {:.2}, {:.2}) deg\n\
+			Rotation Quat: ({:.2}, {:.2}, {:.2}, {:.2})\n\
 			FOV: {:.2} deg",
 					translation.x,
 					translation.y,
@@ -58,19 +59,28 @@ fn update_hud(
 					euler.0.to_degrees(),
 					euler.1.to_degrees(),
 					euler.2.to_degrees(),
+					rotation.x,
+					rotation.y,
+					rotation.z,
+					rotation.w,
 					persp.fov.to_degrees()
 				))
 			} else {
 				Text::new(format!(
 					"Camera Transform:\n\
             Position: ({:.2}, {:.2}, {:.2})\n\
-            Rotation: ({:.2}, {:.2}, {:.2}) deg",
+            Rotation: ({:.2}, {:.2}, {:.2}) deg\n\
+			Rotation Quat: ({:.2}, {:.2}, {:.2}, {:.2})",
 					translation.x,
 					translation.y,
 					translation.z,
 					euler.0.to_degrees(),
 					euler.1.to_degrees(),
-					euler.2.to_degrees()
+					euler.2.to_degrees(),
+					rotation.x,
+					rotation.y,
+					rotation.z,
+					rotation.w
 				))
 			};
 		}
