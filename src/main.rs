@@ -52,6 +52,8 @@ struct DollyZoomLens {
 	end_fov: f32,
 	start_rot: Quat,
 	end_rot: Quat,
+	start_size: f32,
+	end_size: f32,
 }
 
 const PADDING: f32 = 500.0;
@@ -59,7 +61,8 @@ const PADDING: f32 = 500.0;
 impl Lens<Transform> for DollyZoomLens {
 	fn lerp(&mut self, target: &mut dyn Targetable<Transform>, ratio: f32) {
 		let fov = self.start_fov + (self.end_fov - self.start_fov) * ratio;
-		let distance = dolly_zoom_distance(WORLD_SIZE + PADDING, fov);
+		let size = self.start_size + (self.end_size - self.start_size) * ratio;
+		let distance = dolly_zoom_distance(size, fov);
 		// let distance = self.start_distance + (self.end_distance - self.start_distance) * ratio;
 		let rot = self.start_rot.slerp(self.end_rot, ratio);
 		let direction = rot * Vec3::Z;
@@ -113,7 +116,7 @@ fn main() {
 }
 
 fn setup(mut commands: Commands) {
-	let (transform, perspective) = create_perspective_angled_state();
+	let (transform, perspective) = create_perspective_angled_state(WORLD_SIZE + 4206.9); // Just a random value to test its smooth
 
 	commands.spawn((
 		transform,
@@ -175,6 +178,7 @@ fn toggle_camera(
 			match (camera_mode.current_mode, new_mode) {
 				// Perspective → Orthographic: 1-stage transition
 				(CameraState::PerspectiveAngled, CameraState::OrthographicTopDown) => {
+					let end_size = WORLD_SIZE + PADDING;
 					let end_fov = CLOSE_TO_ORTHOGRAPHIC_FOV;
 					let start_fov = if let Projection::Perspective(p) = current_projection {
 						p.fov
@@ -188,6 +192,9 @@ fn toggle_camera(
 						0.0_f32.to_radians(),
 						90.0_f32.to_radians(),
 					);
+					// Calculate current camera's effective size from its position and FOV
+					let current_distance = current_transform.translation.length();
+					let current_size = dolly_zoom_width(current_distance, start_fov);
 					let transform_tween = Tween::new(
 						EaseFunction::SmoothStep,
 						std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
@@ -196,6 +203,8 @@ fn toggle_camera(
 							end_fov,
 							start_rot,
 							end_rot,
+							start_size: current_size,
+							end_size,
 						},
 					);
 					let fov_tween = Tween::new(
@@ -213,7 +222,9 @@ fn toggle_camera(
 				}
 				// Orthographic → Perspective: 1-stage transition
 				(CameraState::OrthographicTopDown, CameraState::PerspectiveAngled) => {
-					let (_, angled_projection) = create_perspective_angled_state();
+					let end_size = WORLD_SIZE + PADDING;
+					let (angled_transform, angled_projection) =
+						create_perspective_angled_state(end_size);
 					let start_fov = if let Projection::Perspective(p) = current_projection {
 						p.fov
 					} else {
@@ -221,8 +232,11 @@ fn toggle_camera(
 					};
 					let end_fov = angled_projection.fov;
 					let start_rot = current_transform.rotation;
-					let end_transform = create_perspective_angled_state().0;
+					let end_transform = angled_transform;
 					let end_rot = end_transform.rotation;
+					// Calculate current camera's effective size from its position and FOV
+					let current_distance = current_transform.translation.length();
+					let current_size = dolly_zoom_width(current_distance, start_fov);
 					let transform_tween = Tween::new(
 						EaseFunction::SmoothStep,
 						std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
@@ -231,6 +245,8 @@ fn toggle_camera(
 							end_fov,
 							start_rot,
 							end_rot,
+							start_size: current_size,
+							end_size,
 						},
 					);
 					let fov_tween = Tween::new(
@@ -277,10 +293,10 @@ fn cleanup_completed_tweens(
 	}
 }
 
-fn create_perspective_angled_state() -> (Transform, PerspectiveProjection) {
+fn create_perspective_angled_state(size: f32) -> (Transform, PerspectiveProjection) {
 	let fov = 60.0_f32.to_radians();
 	// Desired camera position at 60deg FOV, looking from a diagonal angle
-	let distance = dolly_zoom_distance(WORLD_SIZE + PADDING, fov);
+	let distance = dolly_zoom_distance(size, fov);
 	let initial_angle = Vec3::ONE;
 	let angled_pos = initial_angle.normalize() * distance;
 	let transform = Transform::from_translation(angled_pos).looking_at(Vec3::ZERO, Vec3::Y);
@@ -290,6 +306,10 @@ fn create_perspective_angled_state() -> (Transform, PerspectiveProjection) {
 
 fn dolly_zoom_distance(width: f32, fov: f32) -> f32 {
 	width / (2.0 * (0.5 * fov).tan())
+}
+
+fn dolly_zoom_width(distance: f32, fov: f32) -> f32 {
+	distance * 2.0 * (0.5 * fov).tan()
 }
 
 fn create_perspective_projection(fov: f32) -> PerspectiveProjection {
