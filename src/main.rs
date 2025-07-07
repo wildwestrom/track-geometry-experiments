@@ -6,6 +6,7 @@ use bevy::{
 	},
 };
 use bevy_egui::EguiPlugin;
+use bevy_panorbit_camera::*;
 use bevy_tweening::*;
 use std::f32::consts::PI;
 
@@ -24,27 +25,24 @@ struct CameraMode {
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum CameraState {
-	PerspectiveAngled,
-	OrthographicTopDown,
+	Perspective,
+	Orthographic,
 }
 
 impl Default for CameraState {
 	fn default() -> Self {
-		CameraState::PerspectiveAngled
+		CameraState::Perspective
 	}
 }
 
 impl CameraState {
 	fn next(self) -> Self {
 		match self {
-			CameraState::PerspectiveAngled => CameraState::OrthographicTopDown,
-			CameraState::OrthographicTopDown => CameraState::PerspectiveAngled,
+			CameraState::Perspective => CameraState::Orthographic,
+			CameraState::Orthographic => CameraState::Perspective,
 		}
 	}
 }
-
-#[derive(Component)]
-struct MainCamera;
 
 #[derive(Debug, Clone, Copy)]
 struct DollyZoomLens {
@@ -77,6 +75,65 @@ impl Lens<Transform> for DollyZoomLens {
 }
 
 #[derive(Debug, Clone, Copy)]
+struct PanOrbitCameraLens {
+	start_fov: f32,
+	end_fov: f32,
+	start_rot: Quat,
+	end_rot: Quat,
+	start_size: f32,
+	end_size: f32,
+}
+
+impl Lens<PanOrbitCamera> for PanOrbitCameraLens {
+	fn lerp(&mut self, target: &mut dyn Targetable<PanOrbitCamera>, ratio: f32) {
+		let fov = self.start_fov + (self.end_fov - self.start_fov) * ratio;
+		let size = self.start_size + (self.end_size - self.start_size) * ratio;
+		let distance = dolly_zoom_distance(size, fov);
+		let rot = self.start_rot.slerp(self.end_rot, ratio);
+		let direction = rot * Vec3::Z;
+
+		// Calculate the camera position
+		let translation = direction * distance;
+
+		// Use the calculate_from_translation_and_focus function to get internal state
+		let (yaw, pitch, radius) = calculate_from_translation_and_focus(
+			translation,
+			Vec3::ZERO,                  // focus point
+			[Vec3::X, Vec3::Y, Vec3::Z], // axis
+		);
+
+		if let Some(pan_orbit_camera) = target.as_any_mut().downcast_mut::<PanOrbitCamera>() {
+			pan_orbit_camera.yaw = Some(yaw);
+			pan_orbit_camera.pitch = Some(pitch);
+			pan_orbit_camera.radius = Some(radius);
+			pan_orbit_camera.focus = Vec3::ZERO;
+			pan_orbit_camera.target_yaw = yaw;
+			pan_orbit_camera.target_pitch = pitch;
+			pan_orbit_camera.target_radius = radius;
+			pan_orbit_camera.target_focus = Vec3::ZERO;
+		}
+	}
+}
+
+// Helper function to calculate internal state from transform
+fn calculate_from_translation_and_focus(
+	translation: Vec3,
+	focus: Vec3,
+	axis: [Vec3; 3],
+) -> (f32, f32, f32) {
+	let axis = Mat3::from_cols(axis[0], axis[1], axis[2]);
+	let comp_vec = translation - focus;
+	let mut radius = comp_vec.length();
+	if radius == 0.0 {
+		radius = 0.05; // Radius 0 causes problems
+	}
+	let comp_vec = axis * comp_vec;
+	let yaw = comp_vec.x.atan2(comp_vec.z);
+	let pitch = (comp_vec.y / radius).asin();
+	(yaw, pitch, radius)
+}
+
+#[derive(Debug, Clone, Copy)]
 struct ProjectionFovLens {
 	start: f32,
 	end: f32,
@@ -102,6 +159,7 @@ fn main() {
 			..default()
 		}))
 		.add_plugins(EguiPlugin::default())
+		.add_plugins(PanOrbitCameraPlugin)
 		.add_plugins(TweeningPlugin)
 		.add_plugins(CameraDebugHud)
 		.add_plugins(TerrainPlugin)
@@ -111,6 +169,10 @@ fn main() {
 		.add_systems(
 			Update,
 			bevy_tweening::component_animator_system::<Projection>,
+		)
+		.add_systems(
+			Update,
+			bevy_tweening::component_animator_system::<PanOrbitCamera>,
 		)
 		.run();
 }
@@ -126,7 +188,7 @@ fn setup(mut commands: Commands) {
 			order: 0,
 			..default()
 		},
-		MainCamera,
+		PanOrbitCamera::default(),
 	));
 
 	commands.spawn((
@@ -165,10 +227,11 @@ fn toggle_camera(
 	keyboard_input: Res<ButtonInput<KeyCode>>,
 	mut camera_mode: ResMut<CameraMode>,
 	mut commands: Commands,
-	camera_query: Query<(Entity, &Transform, &Projection), With<MainCamera>>,
+	camera_query: Query<(Entity, &Transform, &Projection, &PanOrbitCamera)>,
 ) {
 	if keyboard_input.just_pressed(KeyCode::KeyT) && !camera_mode.is_transitioning {
-		if let Ok((camera_entity, current_transform, current_projection)) = camera_query.single() {
+		if let Ok((camera_entity, current_transform, current_projection, _)) = camera_query.single()
+		{
 			let new_mode = camera_mode.current_mode.next();
 			camera_mode.is_transitioning = true;
 
@@ -177,7 +240,7 @@ fn toggle_camera(
 
 			match (camera_mode.current_mode, new_mode) {
 				// Perspective → Orthographic: 1-stage transition
-				(CameraState::PerspectiveAngled, CameraState::OrthographicTopDown) => {
+				(CameraState::Perspective, CameraState::Orthographic) => {
 					let end_size = WORLD_SIZE + PADDING;
 					let end_fov = CLOSE_TO_ORTHOGRAPHIC_FOV;
 					let start_fov = if let Projection::Perspective(p) = current_projection {
@@ -215,13 +278,26 @@ fn toggle_camera(
 							end: end_fov,
 						},
 					);
+					let pan_orbit_tween = Tween::new(
+						EaseFunction::SmoothStep,
+						std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
+						PanOrbitCameraLens {
+							start_fov,
+							end_fov,
+							start_rot,
+							end_rot,
+							start_size: current_size,
+							end_size,
+						},
+					);
 					commands
 						.entity(camera_entity)
 						.insert(Animator::new(transform_tween))
-						.insert(Animator::new(fov_tween));
+						.insert(Animator::new(fov_tween))
+						.insert(Animator::new(pan_orbit_tween));
 				}
 				// Orthographic → Perspective: 1-stage transition
-				(CameraState::OrthographicTopDown, CameraState::PerspectiveAngled) => {
+				(CameraState::Orthographic, CameraState::Perspective) => {
 					let end_size = WORLD_SIZE + PADDING;
 					let (angled_transform, angled_projection) =
 						create_perspective_angled_state(end_size);
@@ -257,10 +333,23 @@ fn toggle_camera(
 							end: end_fov,
 						},
 					);
+					let pan_orbit_tween = Tween::new(
+						EaseFunction::SmoothStep,
+						std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
+						PanOrbitCameraLens {
+							start_fov,
+							end_fov,
+							start_rot,
+							end_rot,
+							start_size: current_size,
+							end_size,
+						},
+					);
 					commands
 						.entity(camera_entity)
 						.insert(Animator::new(transform_tween))
-						.insert(Animator::new(fov_tween));
+						.insert(Animator::new(fov_tween))
+						.insert(Animator::new(pan_orbit_tween));
 				}
 				_ => unreachable!(),
 			}
@@ -274,7 +363,7 @@ fn cleanup_completed_tweens(
 	time: Res<Time>,
 	mut commands: Commands,
 	mut camera_mode: ResMut<CameraMode>,
-	camera_query: Query<Entity, With<MainCamera>>,
+	camera_query: Query<Entity, With<PanOrbitCamera>>,
 ) {
 	if camera_mode.is_transitioning {
 		camera_mode.transition_timer.tick(time.delta());
@@ -287,6 +376,9 @@ fn cleanup_completed_tweens(
 				commands
 					.entity(camera_entity)
 					.remove::<Animator<Projection>>();
+				commands
+					.entity(camera_entity)
+					.remove::<Animator<PanOrbitCamera>>();
 				camera_mode.is_transitioning = false;
 			}
 		}
