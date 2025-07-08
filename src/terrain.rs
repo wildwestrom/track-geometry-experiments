@@ -282,9 +282,22 @@ fn setup_terrain(
 		settings.terrain.world_z(), // Z
 		settings.terrain.height_multiplier,
 	);
+
 	let noise_texture = generate_texture_from_height_map(&height_map, grid_x, grid_z);
 	let terrain_handle = meshes.add(terrain_mesh);
 	let noise_handle = images.add(noise_texture);
+
+	// Calculate scale to fit within 256x256, preserving aspect ratio
+	let src_width = grid_x + 1;
+	let src_height = grid_z + 1;
+	let max_side = src_width.max(src_height) as f32;
+	let scale = if max_side > 256.0 {
+		256.0 / max_side
+	} else {
+		1.0
+	};
+	let preview_width = src_width as f32 * scale;
+	let preview_height = src_height as f32 * scale;
 
 	commands.spawn((
 		Mesh3d(terrain_handle),
@@ -299,8 +312,8 @@ fn setup_terrain(
 		Node {
 			justify_self: JustifySelf::End,
 			align_self: AlignSelf::Start,
-			width: Val::Px(grid_x as f32 + 1.0),
-			height: Val::Px(grid_z as f32 + 1.0),
+			width: Val::Px(preview_width),
+			height: Val::Px(preview_height),
 			padding: UiRect::all(Val::Px(10.0)),
 			..default()
 		},
@@ -329,8 +342,17 @@ fn update_terrain(
 			let new_texture = generate_texture_from_height_map(&height_map, grid_x, grid_z);
 			let new_texture_handle = images.add(new_texture);
 			*image_node = ImageNode::new(new_texture_handle);
-			node.width = Val::Px(grid_x as f32 + 1.0);
-			node.height = Val::Px(grid_z as f32 + 1.0);
+			// Calculate scale to fit within 256x256, preserving aspect ratio
+			let src_width = grid_x + 1;
+			let src_height = grid_z + 1;
+			let max_side = src_width.max(src_height) as f32;
+			let scale = if max_side > 256.0 {
+				256.0 / max_side
+			} else {
+				1.0
+			};
+			node.width = Val::Px(src_width as f32 * scale);
+			node.height = Val::Px(src_height as f32 * scale);
 		}
 		if let Ok(mut mesh_3d) = terrain_query.single_mut() {
 			let new_terrain_mesh = generate_mesh_from_height_map(
