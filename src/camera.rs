@@ -19,7 +19,6 @@ impl Plugin for CameraPlugin {
 				(
 					toggle_camera,
 					cleanup_completed_tweens,
-					toggle_camera_controls_system,
 					disable_camera_during_transition,
 					bevy_tweening::component_animator_system::<Projection>,
 					bevy_tweening::component_animator_system::<PanOrbitCamera>,
@@ -40,7 +39,7 @@ fn setup(mut commands: Commands, settings: Res<crate::terrain::Settings>) {
 			order: 0,
 			..default()
 		},
-		PanOrbitCamera::default(),
+		PanOrbitCamera { ..default() },
 	));
 
 	commands.spawn((
@@ -66,11 +65,11 @@ fn setup(mut commands: Commands, settings: Res<crate::terrain::Settings>) {
 }
 
 #[derive(Resource)]
-struct CameraMode {
+pub struct CameraMode {
 	current_mode: CameraState,
 	is_transitioning: bool,
 	transition_timer: Timer,
-	user_enabled: bool,
+	pub user_enabled: bool,
 }
 
 impl Default for CameraMode {
@@ -379,18 +378,6 @@ fn disable_camera_during_transition(
 			camera.enabled = false;
 		} else {
 			camera.enabled = camera_mode.user_enabled;
-		}
-	}
-}
-
-fn toggle_camera_controls_system(
-	key_input: Res<ButtonInput<KeyCode>>,
-	mut camera_mode: ResMut<CameraMode>,
-) {
-	// Test if any key is being pressed
-	if key_input.just_pressed(KeyCode::KeyN) {
-		if !camera_mode.is_transitioning {
-			camera_mode.user_enabled = !camera_mode.user_enabled;
 		}
 	}
 }

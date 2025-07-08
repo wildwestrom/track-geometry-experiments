@@ -17,6 +17,7 @@ bevy = { version = "0.16.1", default-features = false, features = [
   "default_font",
   "bevy_log",
   "bevy_picking",
+  "bevy_mesh_picking_backend",
   # non-default-features as of 0.16.1
   "dynamic_linking",
   "bevy_dev_tools",
