@@ -16,11 +16,14 @@ use std::path::Path;
 
 pub struct TerrainPlugin;
 
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub struct TerrainUpdateSet;
+
 impl Plugin for TerrainPlugin {
 	fn build(&self, app: &mut App) {
 		app.insert_resource(load_settings())
 			.add_systems(Startup, setup_terrain)
-			.add_systems(Update, update_terrain)
+			.add_systems(Update, update_terrain.in_set(TerrainUpdateSet))
 			.add_systems(bevy_egui::EguiPrimaryContextPass, ui_system);
 	}
 }
@@ -523,13 +526,19 @@ impl HeightMap {
 		// For rectangular terrain: index = z * (length + 1) + x
 		// This matches the loop order: for z in 0..=grid_width, for x in 0..=grid_length
 		let index = (z * (self.length + 1) + x) as usize;
-		self.heights[index]
+		*self
+			.heights
+			.get(index)
+			.expect("The code should be written in a way such that this doesn't happen")
 	}
 
 	fn set(&mut self, x: u32, z: u32, height: f32) {
 		// For rectangular terrain: index = z * (length + 1) + x
 		// This matches the loop order: for z in 0..=grid_width, for x in 0..=grid_length
 		let index = (z * (self.length + 1) + x) as usize;
-		self.heights[index] = height;
+		*self
+			.heights
+			.get_mut(index)
+			.expect("The code should be written in a way such that this doesn't happen") = height;
 	}
 }
