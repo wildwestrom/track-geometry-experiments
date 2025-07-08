@@ -29,7 +29,7 @@ impl Plugin for CameraPlugin {
 }
 
 fn setup(mut commands: Commands, settings: Res<crate::terrain::Settings>) {
-	let world_size = settings.terrain.world_x().max(settings.terrain.world_z());
+	let world_size = settings.world_x().max(settings.world_z());
 	let (transform, perspective) = create_perspective_angled_state(world_size + 4206.9); // Just a random value to test its smooth
 
 	commands.spawn((
@@ -225,7 +225,7 @@ fn toggle_camera(
 			camera_mode.transition_timer =
 				Timer::from_seconds(TOTAL_TRANSITION_TIME, TimerMode::Once);
 
-			let world_size = settings.terrain.world_x().max(settings.terrain.world_z());
+			let world_size = settings.world_x().max(settings.world_z());
 
 			match (camera_mode.current_mode, new_mode) {
 				// Perspective → Orthographic: 1-stage transition
