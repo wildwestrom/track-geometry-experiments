@@ -4,13 +4,84 @@ use bevy_tweening::*;
 use std::f32::consts::PI;
 
 use crate::hud::CameraDebugHud;
-use crate::terrain::WORLD_SIZE;
 
-#[derive(Resource, Default)]
+pub struct CameraPlugin;
+
+impl Plugin for CameraPlugin {
+	fn build(&self, app: &mut App) {
+		app.add_plugins(PanOrbitCameraPlugin)
+			.add_plugins(TweeningPlugin)
+			.add_plugins(CameraDebugHud)
+			.insert_resource(CameraMode::default())
+			.add_systems(Startup, setup)
+			.add_systems(
+				Update,
+				(
+					toggle_camera,
+					cleanup_completed_tweens,
+					toggle_camera_controls_system,
+					disable_camera_during_transition,
+					bevy_tweening::component_animator_system::<Projection>,
+					bevy_tweening::component_animator_system::<PanOrbitCamera>,
+				),
+			);
+	}
+}
+
+fn setup(mut commands: Commands, settings: Res<crate::terrain::Settings>) {
+	let world_size = settings.terrain.world_x().max(settings.terrain.world_z());
+	let (transform, perspective) = create_perspective_angled_state(world_size + 4206.9); // Just a random value to test its smooth
+
+	commands.spawn((
+		transform,
+		Projection::from(perspective),
+		//Camera3d::default(),
+		Camera {
+			order: 0,
+			..default()
+		},
+		PanOrbitCamera::default(),
+	));
+
+	commands.spawn((
+		DirectionalLight {
+			illuminance: light_consts::lux::OVERCAST_DAY,
+			shadows_enabled: true,
+			..default()
+		},
+		Transform {
+			translation: Vec3::new(0.0, 2.0, 0.0),
+			rotation: Quat::from_rotation_x(-PI / 4.),
+			..default()
+		},
+	));
+
+	commands.spawn((
+		Camera2d,
+		Camera {
+			order: 1,
+			..default()
+		},
+	));
+}
+
+#[derive(Resource)]
 struct CameraMode {
 	current_mode: CameraState,
 	is_transitioning: bool,
 	transition_timer: Timer,
+	user_enabled: bool,
+}
+
+impl Default for CameraMode {
+	fn default() -> Self {
+		Self {
+			current_mode: CameraState::Perspective,
+			is_transitioning: false,
+			transition_timer: Timer::from_seconds(0.0, TimerMode::Repeating),
+			user_enabled: true,
+		}
+	}
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -128,70 +199,6 @@ impl Lens<Projection> for ProjectionFovLens {
 	}
 }
 
-pub struct CameraPlugin;
-
-impl Plugin for CameraPlugin {
-	fn build(&self, app: &mut App) {
-		app.add_plugins(PanOrbitCameraPlugin)
-			.add_plugins(TweeningPlugin)
-			.add_plugins(CameraDebugHud)
-			.insert_resource(CameraMode::default())
-			.add_systems(Startup, setup)
-			.add_systems(
-				Update,
-				(
-					toggle_camera,
-					cleanup_completed_tweens,
-					disable_camera_during_transition,
-				),
-			)
-			.add_systems(
-				Update,
-				bevy_tweening::component_animator_system::<Projection>,
-			)
-			.add_systems(
-				Update,
-				bevy_tweening::component_animator_system::<PanOrbitCamera>,
-			);
-	}
-}
-
-fn setup(mut commands: Commands) {
-	let (transform, perspective) = create_perspective_angled_state(WORLD_SIZE + 4206.9); // Just a random value to test its smooth
-
-	commands.spawn((
-		transform,
-		Projection::from(perspective),
-		Camera3d::default(),
-		Camera {
-			order: 0,
-			..default()
-		},
-		PanOrbitCamera::default(),
-	));
-
-	commands.spawn((
-		DirectionalLight {
-			illuminance: light_consts::lux::OVERCAST_DAY,
-			shadows_enabled: true,
-			..default()
-		},
-		Transform {
-			translation: Vec3::new(0.0, 2.0, 0.0),
-			rotation: Quat::from_rotation_x(-PI / 4.),
-			..default()
-		},
-	));
-
-	commands.spawn((
-		Camera2d,
-		Camera {
-			order: 1,
-			..default()
-		},
-	));
-}
-
 // Here's how the state transition works:
 // Whenever the user presses the toggle key, the camera will transition to the next state.
 // Perspective → Orthographic: Animate FOV to a very small value and move the camera to a top-down position in a single tween.
@@ -207,6 +214,7 @@ fn toggle_camera(
 	mut camera_mode: ResMut<CameraMode>,
 	mut commands: Commands,
 	camera_query: Query<(Entity, &Transform, &Projection, &PanOrbitCamera)>,
+	settings: Res<crate::terrain::Settings>,
 ) {
 	if keyboard_input.just_pressed(KeyCode::KeyT) && !camera_mode.is_transitioning {
 		if let Ok((camera_entity, current_transform, current_projection, _)) = camera_query.single()
@@ -217,10 +225,12 @@ fn toggle_camera(
 			camera_mode.transition_timer =
 				Timer::from_seconds(TOTAL_TRANSITION_TIME, TimerMode::Once);
 
+			let world_size = settings.terrain.world_x().max(settings.terrain.world_z());
+
 			match (camera_mode.current_mode, new_mode) {
 				// Perspective → Orthographic: 1-stage transition
 				(CameraState::Perspective, CameraState::Orthographic) => {
-					let end_size = WORLD_SIZE + PADDING;
+					let end_size = world_size + PADDING; // TODO: Use settings.terrain.world_length().max(settings.terrain.world_width()) instead of hardcoded value
 					let end_fov = CLOSE_TO_ORTHOGRAPHIC_FOV;
 					let start_fov = if let Projection::Perspective(p) = current_projection {
 						p.fov
@@ -273,7 +283,7 @@ fn toggle_camera(
 				}
 				// Orthographic → Perspective: 1-stage transition
 				(CameraState::Orthographic, CameraState::Perspective) => {
-					let end_size = WORLD_SIZE + PADDING;
+					let end_size = world_size + PADDING; // TODO: Use settings.terrain.world_length().max(settings.terrain.world_width()) instead of hardcoded value
 					let (angled_transform, angled_projection) =
 						create_perspective_angled_state(end_size);
 					let start_fov = if let Projection::Perspective(p) = current_projection {
@@ -365,7 +375,23 @@ fn disable_camera_during_transition(
 	mut camera_query: Query<&mut PanOrbitCamera>,
 ) {
 	if let Ok(mut camera) = camera_query.single_mut() {
-		camera.enabled = !camera_mode.is_transitioning;
+		if camera_mode.is_transitioning {
+			camera.enabled = false;
+		} else {
+			camera.enabled = camera_mode.user_enabled;
+		}
+	}
+}
+
+fn toggle_camera_controls_system(
+	key_input: Res<ButtonInput<KeyCode>>,
+	mut camera_mode: ResMut<CameraMode>,
+) {
+	// Test if any key is being pressed
+	if key_input.just_pressed(KeyCode::KeyN) {
+		if !camera_mode.is_transitioning {
+			camera_mode.user_enabled = !camera_mode.user_enabled;
+		}
 	}
 }
 
