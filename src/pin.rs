@@ -1,5 +1,6 @@
 use crate::{
 	camera::CameraMode,
+	spatial::{calculate_terrain_height, clamp_to_terrain_bounds, world_size_for_height},
 	terrain::{self, HeightMap, TerrainUpdateSet},
 };
 use bevy::{prelude::*, window::PrimaryWindow};
@@ -32,7 +33,7 @@ fn startup(
 	mut materials: ResMut<Assets<StandardMaterial>>,
 	settings: Res<terrain::Settings>,
 ) {
-	let world_size = settings.world_x().min(settings.world_z());
+	let world_size = world_size_for_height(&settings);
 	create_pin(
 		&mut commands,
 		&mut meshes,
@@ -45,7 +46,7 @@ fn startup(
 		&mut commands,
 		&mut meshes,
 		&mut materials,
-		Vec3::new(0.0, 0.0, 0.45),
+		Vec3::new(-0.45, 0.0, 0.0),
 		Color::srgb(0.0, 0.0, 0.8), // Blue
 		world_size,
 	);
@@ -75,8 +76,6 @@ fn raycast_terrain(
 	heightmap: &HeightMap,
 	settings: &terrain::Settings,
 ) -> Option<Vec3> {
-	let grid_x = settings.grid_x();
-	let grid_z = settings.grid_z();
 	let world_x = settings.world_x();
 	let world_z = settings.world_z();
 
@@ -87,7 +86,7 @@ fn raycast_terrain(
 	let max_z = world_z / 2.0;
 
 	// Find the maximum possible terrain height for bounds checking
-	let max_terrain_height = world_x.min(world_z) * settings.height_multiplier;
+	let max_terrain_height = world_size_for_height(settings) * settings.height_multiplier;
 	let min_terrain_height = 0.0; // Assuming terrain doesn't go below 0
 
 	// Calculate intersection with terrain bounding box
@@ -141,34 +140,21 @@ fn raycast_terrain(
 		let point = ray.origin + ray.direction * t;
 
 		// Clamp point to terrain bounds for height lookup
-		let clamped_x = point.x.clamp(min_x, max_x);
-		let clamped_z = point.z.clamp(min_z, max_z);
+		let clamped_point = clamp_to_terrain_bounds(point, settings);
 
-		// Convert from world space to grid space
-		let grid_x_f = (clamped_x + world_x / 2.0) / world_x * grid_x as f32;
-		let grid_z_f = (clamped_z + world_z / 2.0) / world_z * grid_z as f32;
-
-		// Clamp to valid grid coordinates
-		let grid_x_clamped = (grid_x_f as u32).min(grid_x.saturating_sub(1));
-		let grid_z_clamped = (grid_z_f as u32).min(grid_z.saturating_sub(1));
-
-		// TODO: Use the mesh, because the heightmap doesn't always match the mesh.
-		// The mesh will have gradients whereas the heightmap has finite discrete points.
 		// Get height from heightmap and apply the same scaling as the terrain mesh
-		let terrain_height = heightmap.get(grid_x_clamped, grid_z_clamped)
-			* world_x.min(world_z)
-			* settings.height_multiplier;
+		let terrain_height = calculate_terrain_height(clamped_point, heightmap, settings);
 
 		// Check if ray point is at or below terrain height
 		// Offset the cylinder height so that the sphere always follows the mouse when dragging.
 		if point.y - PIN_OFFSET <= terrain_height {
 			// Use clamped position for the result
-			return Some(Vec3::new(clamped_x, terrain_height, clamped_z));
+			return Some(Vec3::new(clamped_point.x, terrain_height, clamped_point.z));
 		}
 
 		// Store the last valid point in case we need to fall back to terrain boundary
 		if point.x >= min_x && point.x <= max_x && point.z >= min_z && point.z <= max_z {
-			last_valid_point = Some(Vec3::new(clamped_x, terrain_height, clamped_z));
+			last_valid_point = Some(Vec3::new(clamped_point.x, terrain_height, clamped_point.z));
 		}
 
 		t += step_size;
@@ -228,12 +214,6 @@ fn move_pins_above_terrain(
 	drag_state: Res<PinDragState>,
 ) {
 	if let Ok(heightmap) = terrain_heightmap.single() {
-		// Convert world coordinates to grid coordinates
-		let grid_x = settings.grid_x();
-		let grid_z = settings.grid_z();
-		let world_x = settings.world_x();
-		let world_z = settings.world_z();
-
 		for (entity, mut transform) in pin_transforms.iter_mut() {
 			// Skip positioning for the pin that's being dragged
 			if let Some(dragging_entity) = drag_state.dragging_pin {
@@ -242,23 +222,12 @@ fn move_pins_above_terrain(
 				}
 			}
 
-			// Convert from world space (-world_size/2 to world_size/2) to grid space (0 to grid_length/width)
-			let grid_x =
-				((transform.translation.x + world_x / 2.0) / world_x * grid_x as f32) as u32;
-			let grid_z =
-				((transform.translation.z + world_z / 2.0) / world_z * grid_z as f32) as u32;
-
-			// Clamp to valid grid coordinates
-			let grid_x = grid_x.min(grid_x - 1);
-			let grid_z = grid_z.min(grid_z - 1);
-
-			// Get height and apply the same scaling as the terrain mesh
-			let height =
-				heightmap.get(grid_x, grid_z) * world_x.min(world_z) * settings.height_multiplier
-					+ PIN_OFFSET;
+			// Get height using spatial utilities
+			let terrain_height =
+				calculate_terrain_height(transform.translation, heightmap, &settings);
 
 			// Position the base at ground level - the sphere will follow as a child
-			transform.translation.y = height;
+			transform.translation.y = terrain_height + PIN_OFFSET;
 		}
 	} else {
 		warn!("No heightmap found");
@@ -275,7 +244,7 @@ fn on_pin_drag_start(
 	drag_state.dragging_pin = Some(trigger.target());
 
 	// Disable camera movement while dragging
-	camera_mode.user_enabled = false;
+	camera_mode.disable_camera_movement();
 }
 
 /// System to update the world position under the cursor every frame
@@ -328,13 +297,13 @@ fn update_dragged_pin_position(
 	if let Some(dragging_entity) = drag_state.dragging_pin {
 		if let Ok(mut pin_transform) = pin_query.get_mut(dragging_entity) {
 			if let Some(world_pos) = cursor_world_pos.0 {
-				let half_world_x = settings.world_x() / 2.0;
-				let half_world_z = settings.world_z() / 2.0;
+				// Clamp position to terrain bounds
+				let clamped_pos = clamp_to_terrain_bounds(world_pos, &settings);
 
 				// Position cylinder at terrain height so sphere hovers above it
-				pin_transform.translation.x = world_pos.x.clamp(-half_world_x, half_world_x);
-				pin_transform.translation.z = world_pos.z.clamp(-half_world_z, half_world_z);
-				pin_transform.translation.y = world_pos.y + PIN_OFFSET;
+				pin_transform.translation.x = clamped_pos.x;
+				pin_transform.translation.z = clamped_pos.z;
+				pin_transform.translation.y = clamped_pos.y + PIN_OFFSET;
 			}
 		}
 	}
@@ -347,7 +316,7 @@ fn cancel_drag_on_global_mouse_release(
 	mut camera_mode: ResMut<CameraMode>,
 ) {
 	if drag_state.dragging_pin.is_some() && mouse_buttons.just_released(MouseButton::Left) {
-		camera_mode.user_enabled = true;
+		camera_mode.enable_camera_movement();
 		drag_state.dragging_pin = None;
 		info!("Stopped dragging pin due to global mouse release");
 	}
@@ -361,7 +330,7 @@ fn on_pin_drag_end(
 ) {
 	if let Some(dragging_entity) = drag_state.dragging_pin {
 		if dragging_entity == trigger.target() {
-			camera_mode.user_enabled = true;
+			camera_mode.enable_camera_movement();
 			drag_state.dragging_pin = None;
 			info!("Stopped dragging pin {:?}", trigger.target());
 		}

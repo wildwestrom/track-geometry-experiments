@@ -11,6 +11,7 @@ use bevy_egui::EguiPlugin;
 mod camera;
 mod hud;
 mod pin;
+mod spatial;
 mod terrain;
 
 use crate::camera::CameraPlugin;
@@ -36,12 +37,7 @@ fn main() {
 			default_color: Color::srgb(1.0, 1.0, 1.0),
 		})
 		.add_systems(Startup, startup)
-		.add_systems(
-			Update,
-			(
-				toggle_wireframe_system,
-			),
-		)
+		.add_systems(Update, (toggle_wireframe_system,))
 		.run();
 }
 

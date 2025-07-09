@@ -4,6 +4,7 @@ use bevy_tweening::*;
 use std::f32::consts::PI;
 
 use crate::hud::CameraDebugHud;
+use crate::spatial::world_size;
 
 pub struct CameraPlugin;
 
@@ -28,7 +29,7 @@ impl Plugin for CameraPlugin {
 }
 
 fn setup(mut commands: Commands, settings: Res<crate::terrain::Settings>) {
-	let world_size = settings.world_x().max(settings.world_z());
+	let world_size = world_size(&settings);
 	let (transform, perspective) = create_perspective_angled_state(world_size + 4206.9); // Just a random value to test its smooth
 
 	commands.spawn((
@@ -67,9 +68,31 @@ fn setup(mut commands: Commands, settings: Res<crate::terrain::Settings>) {
 #[derive(Resource)]
 pub struct CameraMode {
 	current_mode: CameraState,
-	is_transitioning: bool,
+	pub is_transitioning: bool,
 	transition_timer: Timer,
 	pub user_enabled: bool,
+}
+
+impl CameraMode {
+	/// Disable camera movement (typically during drag operations)
+	pub fn disable_camera_movement(&mut self) {
+		self.user_enabled = false;
+	}
+
+	/// Enable camera movement
+	pub fn enable_camera_movement(&mut self) {
+		self.user_enabled = true;
+	}
+
+	/// Check if camera is in transition
+	pub fn is_camera_transitioning(&self) -> bool {
+		self.is_transitioning
+	}
+
+	/// Check if camera movement is enabled
+	pub fn is_camera_movement_enabled(&self) -> bool {
+		self.user_enabled
+	}
 }
 
 impl Default for CameraMode {
@@ -224,7 +247,7 @@ fn toggle_camera(
 			camera_mode.transition_timer =
 				Timer::from_seconds(TOTAL_TRANSITION_TIME, TimerMode::Once);
 
-			let world_size = settings.world_x().max(settings.world_z());
+			let world_size = world_size(&settings);
 
 			match (camera_mode.current_mode, new_mode) {
 				// Perspective → Orthographic: 1-stage transition
@@ -374,10 +397,10 @@ fn disable_camera_during_transition(
 	mut camera_query: Query<&mut PanOrbitCamera>,
 ) {
 	if let Ok(mut camera) = camera_query.single_mut() {
-		if camera_mode.is_transitioning {
+		if camera_mode.is_camera_transitioning() {
 			camera.enabled = false;
 		} else {
-			camera.enabled = camera_mode.user_enabled;
+			camera.enabled = camera_mode.is_camera_movement_enabled();
 		}
 	}
 }

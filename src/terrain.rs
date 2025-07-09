@@ -1,3 +1,4 @@
+use crate::spatial::{grid_to_world, world_size_for_height};
 use anyhow::Result;
 use bevy::{
 	asset::RenderAssetUsages,
@@ -227,18 +228,16 @@ impl TerrainGenerator {
 		let mut min_height = f32::INFINITY;
 		let mut max_height = f32::NEG_INFINITY;
 
-		// Calculate step sizes for world coordinates
-		let length_x = self.world_x / self.grid_x as f32;
-		let width_z = self.world_z / self.grid_z as f32;
-
 		for z in 0..=self.grid_z {
 			for x in 0..=self.grid_x {
-				// Use world coordinates for noise sampling
-				let x_pos = (x as f32 * length_x) - self.world_x / 2.0;
-				let z_pos = (z as f32 * width_z) - self.world_z / 2.0;
-
-				let height =
-					self.calculate_height_at_position(x_pos, z_pos, settings, &octave_noises);
+				// Use spatial utilities for world coordinate conversion
+				let world_pos = grid_to_world(x, z, settings);
+				let height = self.calculate_height_at_position(
+					world_pos.x,
+					world_pos.z,
+					settings,
+					&octave_noises,
+				);
 				self.height_map.set(x, z, height);
 
 				min_height = min_height.min(height);
@@ -259,24 +258,20 @@ impl TerrainGenerator {
 		}
 	}
 
-	fn generate_mesh(&self) -> Mesh {
+	fn generate_mesh(&self, settings: &Settings) -> Mesh {
 		let mut positions = Vec::new();
 		let mut uvs = Vec::new();
 		let mut indices = Vec::new();
 
-		let x_step = self.world_x / self.grid_x as f32;
-		let z_step = self.world_z / self.grid_z as f32;
-
 		// Generate vertices
 		for z in 0..=self.grid_z {
 			for x in 0..=self.grid_x {
-				let x_pos = (x as f32 * x_step) - self.world_x / 2.0;
-				let z_pos = (z as f32 * z_step) - self.world_z / 2.0;
+				let world_pos = grid_to_world(x, z, settings);
 				let y_pos = self.height_map.get(x, z)
-					* self.world_x.min(self.world_z)
+					* world_size_for_height(settings)
 					* self.height_multiplier;
 
-				positions.push([x_pos, y_pos, z_pos]);
+				positions.push([world_pos.x, y_pos, world_pos.z]);
 				uvs.push([x as f32 / self.grid_x as f32, z as f32 / self.grid_z as f32]);
 			}
 		}
@@ -355,7 +350,7 @@ fn create_terrain_assets(
 ) -> (Handle<Mesh>, Handle<Image>, HeightMap, f32, f32) {
 	let generator = TerrainGenerator::from_settings(settings);
 
-	let terrain_mesh = generator.generate_mesh();
+	let terrain_mesh = generator.generate_mesh(settings);
 	let noise_texture = generator.generate_texture();
 	let (preview_width, preview_height) = generator.calculate_preview_dimensions();
 
@@ -372,8 +367,6 @@ fn create_terrain_assets(
 }
 
 fn render_terrain_config_ui(ui: &mut egui::Ui, settings: &mut Settings) {
-	ui.label("Terrain Configuration:");
-
 	ui.label("Base Grid Resolution:");
 	ui.add(egui::Slider::new(&mut settings.base_grid_resolution, 1..=128).step_by(1.0));
 
@@ -403,8 +396,6 @@ fn render_terrain_config_ui(ui: &mut egui::Ui, settings: &mut Settings) {
 }
 
 fn render_noise_config_ui(ui: &mut egui::Ui, settings: &mut Settings) {
-	ui.label("Noise Parameters:");
-
 	ui.label("Seed:");
 	ui.add(egui::DragValue::new(&mut settings.seed).speed(1.0));
 
@@ -435,11 +426,13 @@ fn render_noise_config_ui(ui: &mut egui::Ui, settings: &mut Settings) {
 
 fn ui_system(mut contexts: EguiContexts, mut settings: ResMut<Settings>) {
 	if let Ok(ctx) = contexts.ctx_mut() {
-		egui::Window::new("Terrain Controls").show(ctx, |ui| {
-			render_terrain_config_ui(ui, &mut settings);
-
-			ui.separator();
-			render_noise_config_ui(ui, &mut settings);
+		egui::Window::new("Terrain Controls").default_pos((10.0, 100.0)).show(ctx, |ui| {
+			ui.collapsing("Terrain Configuration", |ui| {
+				render_terrain_config_ui(ui, &mut settings);
+			});
+			ui.collapsing("Noise Parameters:", |ui| {
+				render_noise_config_ui(ui, &mut settings);
+			});
 
 			ui.separator();
 			if ui.button("Save Settings").clicked() {
@@ -493,24 +486,26 @@ fn update_terrain(
 	mut meshes: ResMut<Assets<Mesh>>,
 	settings: Res<Settings>,
 ) {
-	// Only update if settings have changed
 	if settings.is_changed() {
-		let (mesh_handle, texture_handle, new_height_map, preview_width, preview_height) =
-			create_terrain_assets(&settings, &mut meshes, &mut images);
+		// Regenerate terrain assets
+		let generator = TerrainGenerator::from_settings(&settings);
+		let new_mesh = generator.generate_mesh(&settings);
+		let new_texture = generator.generate_texture();
+		let (preview_width, preview_height) = generator.calculate_preview_dimensions();
 
-		// Update texture preview
-		if let Ok((mut image_node, mut node)) = noise_texture_query.single_mut() {
-			let new_texture_handle = texture_handle;
-			*image_node = ImageNode::new(new_texture_handle);
-			node.width = Val::Px(preview_width);
-			node.height = Val::Px(preview_height);
+		// Update the terrain mesh
+		if let Ok((mut mesh_handle, mut heightmap)) = terrain_query.single_mut() {
+			*heightmap = generator.height_map;
+			*mesh_handle = Mesh3d(meshes.add(new_mesh));
 		}
 
-		// Update terrain mesh and height map
-		if let Ok((mut mesh_3d, mut height_map)) = terrain_query.single_mut() {
-			let new_mesh_handle = mesh_handle;
-			*mesh_3d = Mesh3d(new_mesh_handle);
-			*height_map = new_height_map;
+		// Update the noise texture
+		if let Ok((mut image_handle, mut ui_node)) = noise_texture_query.single_mut() {
+			*image_handle = ImageNode::new(images.add(new_texture));
+
+			// Update the UI node size
+			ui_node.width = Val::Px(preview_width);
+			ui_node.height = Val::Px(preview_height);
 		}
 	}
 }
