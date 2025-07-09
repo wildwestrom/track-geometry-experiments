@@ -29,7 +29,7 @@ impl Plugin for TerrainPlugin {
 	}
 }
 
-#[derive(Resource, Serialize, Deserialize, Clone)]
+#[derive(Resource, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Settings {
 	// Terrain settings
 	pub base_grid_resolution: u32,
@@ -154,18 +154,14 @@ impl TerrainGenerator {
 			heights: vec![0.0; ((grid_z + 1) * (grid_x + 1)) as usize],
 		};
 
-		let mut generator = Self {
+		Self {
 			grid_x,
 			grid_z,
 			world_x,
 			world_z,
 			height_multiplier: settings.height_multiplier,
 			height_map,
-		};
-
-		// Generate the height map data
-		generator.generate_height_map(settings);
-		generator
+		}
 	}
 
 	fn calculate_height_at_position(
@@ -348,7 +344,8 @@ fn create_terrain_assets(
 	meshes: &mut ResMut<Assets<Mesh>>,
 	images: &mut ResMut<Assets<Image>>,
 ) -> (Handle<Mesh>, Handle<Image>, HeightMap, f32, f32) {
-	let generator = TerrainGenerator::from_settings(settings);
+	let mut generator = TerrainGenerator::from_settings(settings);
+	generator.generate_height_map(settings);
 
 	let terrain_mesh = generator.generate_mesh(settings);
 	let noise_texture = generator.generate_texture();
@@ -426,23 +423,36 @@ fn render_noise_config_ui(ui: &mut egui::Ui, settings: &mut Settings) {
 
 fn ui_system(mut contexts: EguiContexts, mut settings: ResMut<Settings>) {
 	if let Ok(ctx) = contexts.ctx_mut() {
-		egui::Window::new("Terrain Controls").default_pos((10.0, 100.0)).show(ctx, |ui| {
-			ui.collapsing("Terrain Configuration", |ui| {
-				render_terrain_config_ui(ui, &mut settings);
-			});
-			ui.collapsing("Noise Parameters:", |ui| {
-				render_noise_config_ui(ui, &mut settings);
+		// Create a snapshot of current settings to detect actual changes
+		let settings_snapshot = settings.clone();
+
+		// Bypass change detection so we can manually control when changes are detected
+		let settings_ptr = settings.bypass_change_detection();
+
+		egui::Window::new("Terrain Controls")
+			.default_pos((10.0, 100.0))
+			.show(ctx, |ui| {
+				ui.collapsing("Terrain Configuration", |ui| {
+					render_terrain_config_ui(ui, settings_ptr);
+				});
+				ui.collapsing("Noise Parameters:", |ui| {
+					render_noise_config_ui(ui, settings_ptr);
+				});
+
+				ui.separator();
+				if ui.button("Save Settings").clicked() {
+					if let Err(e) = settings_ptr.save() {
+						error!("Failed to save settings: {}", e);
+					} else {
+						info!("Settings saved successfully");
+					}
+				}
 			});
 
-			ui.separator();
-			if ui.button("Save Settings").clicked() {
-				if let Err(e) = settings.save() {
-					error!("Failed to save settings: {}", e);
-				} else {
-					info!("Settings saved successfully");
-				}
-			}
-		});
+		// Only mark as changed if settings actually changed
+		if *settings_ptr != settings_snapshot {
+			settings.set_changed();
+		}
 	}
 }
 
@@ -487,25 +497,38 @@ fn update_terrain(
 	settings: Res<Settings>,
 ) {
 	if settings.is_changed() {
-		// Regenerate terrain assets
-		let generator = TerrainGenerator::from_settings(&settings);
+		// Create generator and generate height map once
+		let mut generator = TerrainGenerator::from_settings(&settings);
+		generator.generate_height_map(&settings);
+
+		// Generate mesh and texture from the populated height map
 		let new_mesh = generator.generate_mesh(&settings);
 		let new_texture = generator.generate_texture();
 		let (preview_width, preview_height) = generator.calculate_preview_dimensions();
 
-		// Update the terrain mesh
-		if let Ok((mut mesh_handle, mut heightmap)) = terrain_query.single_mut() {
-			*heightmap = generator.height_map;
+		// Replace the terrain mesh entity
+		if let Ok((mut mesh_handle, mut height_map)) = terrain_query.single_mut() {
+			let old_mesh_id = mesh_handle.id();
+
+			// Create new mesh and update the handle
 			*mesh_handle = Mesh3d(meshes.add(new_mesh));
+			*height_map = generator.height_map;
+
+			// Remove the old mesh asset before creating a new one
+			meshes.remove(old_mesh_id);
 		}
 
-		// Update the noise texture
-		if let Ok((mut image_handle, mut ui_node)) = noise_texture_query.single_mut() {
-			*image_handle = ImageNode::new(images.add(new_texture));
+		// Replace the noise texture entity
+		if let Ok((mut image_handle, mut node)) = noise_texture_query.single_mut() {
+			let old_image_id = image_handle.image.id();
 
-			// Update the UI node size
-			ui_node.width = Val::Px(preview_width);
-			ui_node.height = Val::Px(preview_height);
+			// Create new texture and update the handle
+			*image_handle = ImageNode::new(images.add(new_texture));
+			node.width = Val::Px(preview_width);
+			node.height = Val::Px(preview_height);
+
+			// Remove the old texture asset before creating a new one
+			images.remove(old_image_id);
 		}
 	}
 }
