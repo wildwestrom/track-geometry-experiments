@@ -12,9 +12,6 @@ impl Plugin for PinPlugin {
 			.add_systems(
 				Update,
 				(
-					move_pins_above_terrain,
-					update_dragged_pin_position,
-					cancel_drag_on_global_mouse_release,
 					// This is to make sure when we grab a point from the heightmap
 					// we're always indexing the array within the bounds of the heightmap.
 					move_pins_above_terrain.after(TerrainUpdateSet),
@@ -83,29 +80,80 @@ fn raycast_terrain(
 	let world_x = settings.world_x();
 	let world_z = settings.world_z();
 
-	// Step along the ray to find intersection with terrain
-	let max_distance = 10000.0; // Maximum ray distance
-	let step_size = 0.2; // Step size for ray marching
+	// Calculate terrain bounds
+	let min_x = -world_x / 2.0;
+	let max_x = world_x / 2.0;
+	let min_z = -world_z / 2.0;
+	let max_z = world_z / 2.0;
 
-	let mut t = 0.0;
+	// Find the maximum possible terrain height for bounds checking
+	let max_terrain_height = world_x.min(world_z) * settings.height_multiplier;
+	let min_terrain_height = 0.0; // Assuming terrain doesn't go below 0
+
+	// Calculate intersection with terrain bounding box
+	let mut t_min = 0.0f32;
+	let mut t_max = f32::INFINITY;
+
+	// Check X bounds
+	if ray.direction.x != 0.0 {
+		let tx1 = (min_x - ray.origin.x) / ray.direction.x;
+		let tx2 = (max_x - ray.origin.x) / ray.direction.x;
+		t_min = t_min.max(tx1.min(tx2));
+		t_max = t_max.min(tx1.max(tx2));
+	} else if ray.origin.x < min_x || ray.origin.x > max_x {
+		return None; // Ray is parallel to X bounds and outside
+	}
+
+	// Check Z bounds
+	if ray.direction.z != 0.0 {
+		let tz1 = (min_z - ray.origin.z) / ray.direction.z;
+		let tz2 = (max_z - ray.origin.z) / ray.direction.z;
+		t_min = t_min.max(tz1.min(tz2));
+		t_max = t_max.min(tz1.max(tz2));
+	} else if ray.origin.z < min_z || ray.origin.z > max_z {
+		return None; // Ray is parallel to Z bounds and outside
+	}
+
+	// Check Y bounds (terrain height range)
+	if ray.direction.y != 0.0 {
+		let ty1 = (min_terrain_height - ray.origin.y) / ray.direction.y;
+		let ty2 = (max_terrain_height - ray.origin.y) / ray.direction.y;
+		t_min = t_min.max(ty1.min(ty2));
+		t_max = t_max.min(ty1.max(ty2));
+	}
+
+	// No intersection with bounding box
+	if t_min > t_max || t_max < 0.0 {
+		return None;
+	}
+
+	// Start from the entry point of the bounding box
+	let mut t = t_min.max(0.0);
+	let step_size = 0.2;
+	let max_iterations = 10000; // Safety limit to prevent infinite loops
+	let mut iterations = 0;
+
 	let mut last_valid_point = None;
 
-	while t < max_distance {
+	while t <= t_max && iterations < max_iterations {
+		iterations += 1;
+
 		let point = ray.origin + ray.direction * t;
 
 		// Clamp point to terrain bounds for height lookup
-		let clamped_x = point.x.clamp(-world_x / 2.0, world_x / 2.0);
-		let clamped_z = point.z.clamp(-world_z / 2.0, world_z / 2.0);
+		let clamped_x = point.x.clamp(min_x, max_x);
+		let clamped_z = point.z.clamp(min_z, max_z);
 
 		// Convert from world space to grid space
 		let grid_x_f = (clamped_x + world_x / 2.0) / world_x * grid_x as f32;
 		let grid_z_f = (clamped_z + world_z / 2.0) / world_z * grid_z as f32;
 
 		// Clamp to valid grid coordinates
-		let grid_x_clamped = (grid_x_f as u32).min(grid_x);
-		let grid_z_clamped = (grid_z_f as u32).min(grid_z);
+		let grid_x_clamped = (grid_x_f as u32).min(grid_x.saturating_sub(1));
+		let grid_z_clamped = (grid_z_f as u32).min(grid_z.saturating_sub(1));
 
-		// TODO: Really use the mesh, because the heightmap doesn't always match the mesh. The mesh will have gradients whereas the heightmap has finite discrete points.
+		// TODO: Use the mesh, because the heightmap doesn't always match the mesh.
+		// The mesh will have gradients whereas the heightmap has finite discrete points.
 		// Get height from heightmap and apply the same scaling as the terrain mesh
 		let terrain_height = heightmap.get(grid_x_clamped, grid_z_clamped)
 			* world_x.min(world_z)
@@ -119,11 +167,7 @@ fn raycast_terrain(
 		}
 
 		// Store the last valid point in case we need to fall back to terrain boundary
-		if point.x >= -world_x / 2.0
-			&& point.x <= world_x / 2.0
-			&& point.z >= -world_z / 2.0
-			&& point.z <= world_z / 2.0
-		{
+		if point.x >= min_x && point.x <= max_x && point.z >= min_z && point.z <= max_z {
 			last_valid_point = Some(Vec3::new(clamped_x, terrain_height, clamped_z));
 		}
 
@@ -205,8 +249,8 @@ fn move_pins_above_terrain(
 				((transform.translation.z + world_z / 2.0) / world_z * grid_z as f32) as u32;
 
 			// Clamp to valid grid coordinates
-			let grid_x = grid_x.min(grid_x);
-			let grid_z = grid_z.min(grid_z);
+			let grid_x = grid_x.min(grid_x - 1);
+			let grid_z = grid_z.min(grid_z - 1);
 
 			// Get height and apply the same scaling as the terrain mesh
 			let height =
