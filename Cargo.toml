@@ -1,5 +1,5 @@
 [package]
-name = "terrain_gen"
+name = "track_geometry"
 version = "0.1.0"
 edition = "2024"
 
@@ -18,14 +18,14 @@ bevy = { version = "0.16.1", default-features = false, features = [
   "bevy_log",
   "bevy_picking",
   "bevy_mesh_picking_backend",
-  # non-default-features as of 0.16.1
-  "dynamic_linking",
+  # # non-default-features as of 0.16.1
+  # "dynamic_linking", # use during development
   "bevy_dev_tools",
   "wayland",
   "serialize",
 ] }
 bevy_panorbit_camera = { version = "0.27.0", features = ["bevy_egui"] }
-bevy_egui = "0.35.0"
+bevy_egui = "0.35.1"
 log = { version = "0.4.27", features = [
   "max_level_debug",
   "release_max_level_warn",
