@@ -1,4 +1,4 @@
-use crate::spatial::{grid_to_world, world_size_for_height};
+use crate::spatial::{grid_to_world, world_size};
 use anyhow::Result;
 use bevy::{
 	asset::RenderAssetUsages,
@@ -10,7 +10,7 @@ use bevy::{
 };
 use bevy_egui::{EguiContexts, egui};
 use log::{error, info};
-use noise::{NoiseFn, OpenSimplex};
+use noise::{HybridMulti, MultiFractal, NoiseFn, OpenSimplex};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -42,12 +42,12 @@ pub struct Settings {
 	pub seed: u32,
 	pub offset_x: f32,
 	pub offset_z: f32,
-	pub scale: f32,
 	pub octaves: u8,
-	pub persistence: f32,
-	pub lacunarity: f32,
+	pub frequency: f64,
+	pub persistence: f64,
+	pub lacunarity: f64,
 	pub valley_exponent: f32,
-	pub height_roughness: f32,
+	pub height_roughness: f64,
 }
 
 impl Settings {
@@ -84,7 +84,7 @@ impl Default for Settings {
 			seed: 0,
 			offset_x: 0.0,
 			offset_z: 0.0,
-			scale: 3.8,
+			frequency: 3.8,
 			octaves: 8,
 			persistence: 0.18,
 			lacunarity: 2.3,
@@ -164,61 +164,12 @@ impl TerrainGenerator {
 		}
 	}
 
-	fn calculate_height_at_position(
-		&self,
-		x_pos: f32,
-		z_pos: f32,
-		settings: &Settings,
-		noise_octaves: &[OpenSimplex],
-	) -> f32 {
-		let mut amplitude = 1.0_f64;
-		let mut frequency = 1.0_f32;
-		let mut height = 0.0_f64;
-		let mut max_height = 0.0_f64;
-		let base_world_size = self.world_x.max(self.world_z);
-
-		// Generate fractal noise using multiple octaves
-		for octave in noise_octaves.iter() {
-			// Normalize world coordinates for noise sampling
-			// Scale down world coordinates to a reasonable range for noise
-			let sample_x = (x_pos / base_world_size * settings.scale * frequency)
-				+ (settings.offset_x * frequency);
-			let sample_z = (z_pos / base_world_size * settings.scale * frequency)
-				+ (settings.offset_z * frequency);
-
-			let raw_noise_sample = octave.get([sample_x as f64, sample_z as f64]);
-			height += raw_noise_sample * amplitude;
-			max_height += amplitude;
-
-			// Calculate height-dependent persistence
-			// Convert current height to 0-1 range for the height roughness calculation
-			let current_height_normalized = (height / max_height + 1.0) * 0.5;
-
-			// Apply height roughness: higher elevations get more roughness (higher persistence)
-			// The height_roughness parameter controls how much the height affects persistence
-			let height_factor =
-				1.0 + (current_height_normalized * settings.height_roughness as f64);
-			let dynamic_persistence = settings.persistence as f64 * height_factor;
-
-			amplitude *= dynamic_persistence;
-			frequency *= settings.lacunarity;
-		}
-
-		// Normalize fractal noise
-		height /= max_height;
-		let normalized_height = (height + 1.0) * 0.5;
-
-		// Apply exponential curve to create valleys
-		normalized_height.powf(settings.valley_exponent as f64) as f32
-	}
-
 	fn generate_height_map(&mut self, settings: &Settings) {
-		// Create noise objects for each octave once
-		let mut octave_noises = Vec::new();
-		for octave in 0..settings.octaves {
-			let octave_seed = settings.seed.wrapping_add(octave as u32);
-			octave_noises.push(OpenSimplex::new(octave_seed));
-		}
+		let noise = HybridMulti::<OpenSimplex>::new(settings.seed)
+			.set_octaves(settings.octaves as usize)
+			.set_frequency(settings.frequency as f64)
+			.set_lacunarity(settings.lacunarity as f64)
+			.set_persistence(settings.persistence as f64);
 
 		// Values for normalization
 		let mut min_height = f32::INFINITY;
@@ -229,11 +180,11 @@ impl TerrainGenerator {
 				// Use spatial utilities for world coordinate conversion
 				let world_pos = grid_to_world(x, z, settings);
 				let height = self.calculate_height_at_position(
-					world_pos.x,
-					world_pos.z,
+					world_pos.x as f64,
+					world_pos.z as f64,
 					settings,
-					&octave_noises,
-				);
+					&noise,
+				) as f32;
 				self.height_map.set(x, z, height);
 
 				min_height = min_height.min(height);
@@ -248,10 +199,36 @@ impl TerrainGenerator {
 				for x in 0..=self.grid_x {
 					let height = self.height_map.get(x, z);
 					let normalized_height = (height - min_height) / height_range;
-					self.height_map.set(x, z, normalized_height);
+
+					// Redistribute the noise
+					let final_height = normalized_height.powf(settings.valley_exponent);
+
+					self.height_map.set(x, z, final_height);
 				}
 			}
+		} else {
+			panic!("Why is the height range <= 0?")
 		}
+
+		settings.valley_exponent;
+	}
+
+	fn calculate_height_at_position(
+		&self,
+		x_pos: f64,
+		z_pos: f64,
+		settings: &Settings,
+		noise: impl NoiseFn<f64, 2>,
+	) -> f64 {
+		let base_world_size = self.world_x.max(self.world_z) as f64;
+
+		// Scale the offset inversely with frequency to maintain the same relative position
+		// when frequency changes (since noise function internally scales coordinates by frequency)
+		let sample_x = (x_pos / base_world_size) + (settings.offset_x as f64 / settings.frequency);
+		let sample_z = (z_pos / base_world_size) + (settings.offset_z as f64 / settings.frequency);
+		let height = noise.get([sample_x, sample_z]);
+
+		height
 	}
 
 	fn generate_mesh(&self, settings: &Settings) -> Mesh {
@@ -263,9 +240,8 @@ impl TerrainGenerator {
 		for z in 0..=self.grid_z {
 			for x in 0..=self.grid_x {
 				let world_pos = grid_to_world(x, z, settings);
-				let y_pos = self.height_map.get(x, z)
-					* world_size_for_height(settings)
-					* self.height_multiplier;
+				let y_pos =
+					self.height_map.get(x, z) * world_size(settings) * self.height_multiplier;
 
 				positions.push([world_pos.x, y_pos, world_pos.z]);
 				uvs.push([x as f32 / self.grid_x as f32, z as f32 / self.grid_z as f32]);
@@ -388,7 +364,12 @@ fn render_terrain_config_ui(ui: &mut egui::Ui, settings: &mut Settings) {
 	ui.label("Height Multiplier:");
 	ui.add(egui::Slider::new(
 		&mut settings.height_multiplier,
-		0.0..=2.0,
+		0.0..=1.0,
+	));
+	ui.label("Height Multiplier (fine):");
+	ui.add(egui::Slider::new(
+		&mut settings.height_multiplier,
+		0.0..=0.25,
 	));
 }
 
@@ -397,28 +378,25 @@ fn render_noise_config_ui(ui: &mut egui::Ui, settings: &mut Settings) {
 	ui.add(egui::DragValue::new(&mut settings.seed).speed(1.0));
 
 	ui.label("Offset X:");
-	ui.add(egui::Slider::new(&mut settings.offset_x, -10.0..=10.0).step_by(0.1));
+	ui.add(egui::Slider::new(&mut settings.offset_x, -5.0..=5.0));
 
 	ui.label("Offset Z:");
-	ui.add(egui::Slider::new(&mut settings.offset_z, -10.0..=10.0).step_by(0.1));
+	ui.add(egui::Slider::new(&mut settings.offset_z, -5.0..=5.0));
 
-	ui.label("Scale:");
-	ui.add(egui::Slider::new(&mut settings.scale, 0.01..=10.0));
+	ui.label("Frequency:");
+	ui.add(egui::Slider::new(&mut settings.frequency, 0.01..=10.0));
 
 	ui.label("Octaves:");
 	ui.add(egui::Slider::new(&mut settings.octaves, 1..=8).step_by(1.0));
 
 	ui.label("Persistence:");
-	ui.add(egui::Slider::new(&mut settings.persistence, 0.0..=1.0));
+	ui.add(egui::Slider::new(&mut settings.persistence, 0.001..=1.0));
 
 	ui.label("Lacunarity:");
 	ui.add(egui::Slider::new(&mut settings.lacunarity, 1.01..=4.0));
 
 	ui.label("Valley Exponent:");
 	ui.add(egui::Slider::new(&mut settings.valley_exponent, 0.0..=20.0));
-
-	ui.label("Height Roughness:");
-	ui.add(egui::Slider::new(&mut settings.height_roughness, 0.0..=5.0));
 }
 
 fn ui_system(mut contexts: EguiContexts, mut settings: ResMut<Settings>) {
