@@ -41,9 +41,8 @@ pub fn calculate_terrain_height(
 ) -> f32 {
 	let (grid_x, grid_z) = world_to_grid(world_pos, settings);
 	let base_height = heightmap.get(grid_x, grid_z);
-	let world_size = settings.world_x().min(settings.world_z());
 
-	base_height * world_size * settings.height_multiplier
+	base_height * world_size_for_height(settings) * settings.height_multiplier
 }
 
 /// Get the world size (commonly used calculation)

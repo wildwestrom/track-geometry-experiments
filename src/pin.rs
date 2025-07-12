@@ -1,6 +1,6 @@
 use crate::{
 	camera::CameraMode,
-	spatial::{calculate_terrain_height, clamp_to_terrain_bounds, world_size_for_height},
+	spatial::{calculate_terrain_height, clamp_to_terrain_bounds, world_size, world_size_for_height},
 	terrain::{self, HeightMap, TerrainUpdateSet},
 };
 use bevy::{prelude::*, window::PrimaryWindow};
@@ -9,7 +9,8 @@ pub struct PinPlugin;
 
 impl Plugin for PinPlugin {
 	fn build(&self, app: &mut App) {
-		app.add_systems(Startup, startup)
+		app
+			//.add_systems(Startup, startup)
 			.add_systems(
 				Update,
 				(
@@ -27,41 +28,16 @@ impl Plugin for PinPlugin {
 	}
 }
 
-fn startup(
-	mut commands: Commands,
-	mut meshes: ResMut<Assets<Mesh>>,
-	mut materials: ResMut<Assets<StandardMaterial>>,
-	settings: Res<terrain::Settings>,
-) {
-	let world_size = world_size_for_height(&settings);
-	create_pin(
-		&mut commands,
-		&mut meshes,
-		&mut materials,
-		Vec3::new(0.45, 0.0, 0.0),
-		Color::srgb(0.8, 0.0, 0.0), // Red
-		world_size,
-	);
-	create_pin(
-		&mut commands,
-		&mut meshes,
-		&mut materials,
-		Vec3::new(-0.45, 0.0, 0.0),
-		Color::srgb(0.0, 0.0, 0.8), // Blue
-		world_size,
-	);
-}
-
 #[derive(Component)]
-struct Pin;
+pub struct Pin;
 
 #[derive(Resource, Default)]
-struct PinDragState {
+pub struct PinDragState {
 	dragging_pin: Option<Entity>,
 }
 
 #[derive(Resource, Default, Debug, Clone, Copy)]
-struct CursorWorldPos(pub Option<Vec3>);
+pub struct CursorWorldPos(pub Option<Vec3>);
 
 const PINHEAD_RADIUS: f32 = 50_f32;
 const PIN_RADIUS: f32 = PINHEAD_RADIUS * (3.0 / 16.0);
@@ -164,13 +140,14 @@ fn raycast_terrain(
 	last_valid_point
 }
 
-fn create_pin(
+pub fn create_pin(
 	commands: &mut Commands<'_, '_>,
 	meshes: &mut ResMut<'_, Assets<Mesh>>,
 	materials: &mut ResMut<'_, Assets<StandardMaterial>>,
 	initial_position: Vec3,
 	pin_head_color: Color,
 	world_size: f32,
+	point_id: impl Component,
 ) {
 	let sphere_mesh = Sphere::new(PINHEAD_RADIUS).mesh().build();
 	let cylinder_mesh = Cylinder::new(PIN_RADIUS, PIN_HEIGHT).mesh().build();
@@ -193,6 +170,7 @@ fn create_pin(
 			Transform::from_xyz(0.0, 0.0, 0.0)
 				.with_translation(initial_position * world_size + Vec3::new(0.0, 0.0, 0.0)),
 			Pin,
+			point_id,
 			Pickable::default(),
 		))
 		.observe(on_pin_drag_start)
@@ -288,7 +266,7 @@ fn update_cursor_world_pos(
 }
 
 /// System to update the position of the currently dragged pin every frame
-fn update_dragged_pin_position(
+pub fn update_dragged_pin_position(
 	drag_state: Res<PinDragState>,
 	mut pin_query: Query<&mut Transform, With<Pin>>,
 	cursor_world_pos: Res<CursorWorldPos>,
@@ -300,7 +278,7 @@ fn update_dragged_pin_position(
 				// Clamp position to terrain bounds
 				let clamped_pos = clamp_to_terrain_bounds(world_pos, &settings);
 
-				// Position cylinder at terrain height so sphere hovers above it
+				// Position pin so the sphere (head) is above the terrain intersection point
 				pin_transform.translation.x = clamped_pos.x;
 				pin_transform.translation.z = clamped_pos.z;
 				pin_transform.translation.y = clamped_pos.y + PIN_OFFSET;

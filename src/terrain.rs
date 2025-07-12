@@ -1,5 +1,5 @@
-use crate::spatial::{grid_to_world, world_size};
-use anyhow::Result;
+use crate::spatial::{grid_to_world, world_size, world_size_for_height};
+use crate::saveable::SaveableSettings;
 use bevy::{
 	asset::RenderAssetUsages,
 	prelude::*,
@@ -9,11 +9,8 @@ use bevy::{
 	},
 };
 use bevy_egui::{EguiContexts, egui};
-use log::{error, info};
 use noise::{HybridMulti, MultiFractal, NoiseFn, OpenSimplex};
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::Path;
 
 pub struct TerrainPlugin;
 
@@ -50,23 +47,9 @@ pub struct Settings {
 	pub height_roughness: f64,
 }
 
-impl Settings {
-	fn save(&self) -> Result<()> {
-		let settings_path = "terrain_settings.json";
-		let json = serde_json::to_string_pretty(self)?;
-		fs::write(settings_path, json)?;
-		Ok(())
-	}
-
-	fn load() -> Result<Self> {
-		let settings_path = "terrain_settings.json";
-		if Path::new(settings_path).exists() {
-			let json = fs::read_to_string(settings_path)?;
-			let settings = serde_json::from_str(&json)?;
-			Ok(settings)
-		} else {
-			Ok(Settings::default())
-		}
+impl SaveableSettings for Settings {
+	fn filename() -> &'static str {
+		"terrain_settings.json"
 	}
 }
 
@@ -113,16 +96,7 @@ impl Settings {
 }
 
 fn load_settings() -> Settings {
-	match Settings::load() {
-		Ok(settings) => {
-			info!("Loaded terrain settings from file");
-			settings
-		}
-		Err(e) => {
-			error!("Failed to load settings: {}. Using defaults.", e);
-			Settings::default()
-		}
-	}
+	Settings::load_or_default()
 }
 
 #[derive(Component)]
@@ -207,7 +181,10 @@ impl TerrainGenerator {
 				}
 			}
 		} else {
-			panic!("Why is the height range <= 0?")
+			panic!(
+				"Height range is {} (min: {}, max: {}). This indicates a bug in terrain generation.",
+				height_range, min_height, max_height
+			);
 		}
 
 		settings.valley_exponent;
@@ -241,7 +218,7 @@ impl TerrainGenerator {
 			for x in 0..=self.grid_x {
 				let world_pos = grid_to_world(x, z, settings);
 				let y_pos =
-					self.height_map.get(x, z) * world_size(settings) * self.height_multiplier;
+					self.height_map.get(x, z) * world_size_for_height(settings) * self.height_multiplier;
 
 				positions.push([world_pos.x, y_pos, world_pos.z]);
 				uvs.push([x as f32 / self.grid_x as f32, z as f32 / self.grid_z as f32]);
@@ -339,64 +316,91 @@ fn create_terrain_assets(
 	)
 }
 
+/// Helper function to create a labeled slider with standard formatting
+fn add_labeled_slider<T>(
+	ui: &mut egui::Ui,
+	label: &str,
+	value: &mut T,
+	range: impl Into<std::ops::RangeInclusive<T>>,
+) where
+	T: egui::emath::Numeric,
+{
+	ui.label(label);
+	ui.add(egui::Slider::new(value, range.into()));
+}
+
+/// Helper function to create a labeled integer slider with step
+fn add_labeled_int_slider<T>(
+	ui: &mut egui::Ui,
+	label: &str,
+	value: &mut T,
+	range: impl Into<std::ops::RangeInclusive<T>>,
+) where
+	T: egui::emath::Numeric,
+{
+	ui.label(label);
+	ui.add(egui::Slider::new(value, range.into()).step_by(1.0));
+}
+
+/// Helper function to add an info label with formatting
+fn add_info_label(ui: &mut egui::Ui, label: &str, args: std::fmt::Arguments) {
+	ui.label(&format!("{}: {}", label, args));
+}
+
 fn render_terrain_config_ui(ui: &mut egui::Ui, settings: &mut Settings) {
-	ui.label("Base Grid Resolution:");
-	ui.add(egui::Slider::new(&mut settings.base_grid_resolution, 1..=128).step_by(1.0));
+	add_labeled_int_slider(
+		ui,
+		"Base Grid Resolution",
+		&mut settings.base_grid_resolution,
+		1..=128,
+	);
+	add_labeled_int_slider(ui, "Aspect Ratio X", &mut settings.aspect_x, 1..=8);
+	add_labeled_int_slider(ui, "Aspect Ratio Z", &mut settings.aspect_z, 1..=8);
 
-	ui.label("Aspect Ratio X:");
-	ui.add(egui::Slider::new(&mut settings.aspect_x, 1..=8).step_by(1.0));
+	add_info_label(
+		ui,
+		"Grid Size",
+		format_args!("{}x{}", settings.grid_x(), settings.grid_z()),
+	);
+	add_info_label(
+		ui,
+		"World Size",
+		format_args!(
+			"{:.1}x{:.1} (meters)",
+			settings.world_x(),
+			settings.world_z()
+		),
+	);
 
-	ui.label("Aspect Ratio Z:");
-	ui.add(egui::Slider::new(&mut settings.aspect_z, 1..=8).step_by(1.0));
-
-	ui.label(&format!(
-		"Grid Size: {}x{}",
-		settings.grid_x(),
-		settings.grid_z()
-	));
-
-	ui.label(&format!(
-		"World Size: {:.1}x{:.1} (meters)",
-		settings.world_x(),
-		settings.world_z()
-	));
-
-	ui.label("Height Multiplier:");
-	ui.add(egui::Slider::new(
+	add_labeled_slider(
+		ui,
+		"Height Multiplier",
 		&mut settings.height_multiplier,
 		0.0..=1.0,
-	));
+	);
 	ui.label("Height Multiplier (fine):");
-	ui.add(egui::Slider::new(
-		&mut settings.height_multiplier,
-		0.0..=0.25,
-	));
+	ui.add(
+		egui::Slider::new(&mut settings.height_multiplier, 0.0..=0.25)
+			.clamping(egui::SliderClamping::Edits),
+	);
 }
 
 fn render_noise_config_ui(ui: &mut egui::Ui, settings: &mut Settings) {
-	ui.label("Seed:");
-	ui.add(egui::DragValue::new(&mut settings.seed).speed(1.0));
+	ui.label("Seed");
+	ui.add(egui::DragValue::new(&mut settings.seed).speed(1));
 
-	ui.label("Offset X:");
-	ui.add(egui::Slider::new(&mut settings.offset_x, -5.0..=5.0));
-
-	ui.label("Offset Z:");
-	ui.add(egui::Slider::new(&mut settings.offset_z, -5.0..=5.0));
-
-	ui.label("Frequency:");
-	ui.add(egui::Slider::new(&mut settings.frequency, 0.01..=10.0));
-
-	ui.label("Octaves:");
-	ui.add(egui::Slider::new(&mut settings.octaves, 1..=8).step_by(1.0));
-
-	ui.label("Persistence:");
-	ui.add(egui::Slider::new(&mut settings.persistence, 0.001..=1.0));
-
-	ui.label("Lacunarity:");
-	ui.add(egui::Slider::new(&mut settings.lacunarity, 1.01..=4.0));
-
-	ui.label("Valley Exponent:");
-	ui.add(egui::Slider::new(&mut settings.valley_exponent, 0.0..=20.0));
+	add_labeled_slider(ui, "Offset X", &mut settings.offset_x, -5.0..=5.0);
+	add_labeled_slider(ui, "Offset Z", &mut settings.offset_z, -5.0..=5.0);
+	add_labeled_slider(ui, "Frequency", &mut settings.frequency, 0.01..=10.0);
+	add_labeled_int_slider(ui, "Octaves", &mut settings.octaves, 1..=8);
+	add_labeled_slider(ui, "Persistence", &mut settings.persistence, 0.001..=1.0);
+	add_labeled_slider(ui, "Lacunarity", &mut settings.lacunarity, 1.01..=4.0);
+	add_labeled_slider(
+		ui,
+		"Valley Exponent",
+		&mut settings.valley_exponent,
+		0.0..=20.0,
+	);
 }
 
 fn ui_system(mut contexts: EguiContexts, mut settings: ResMut<Settings>) {
@@ -418,13 +422,7 @@ fn ui_system(mut contexts: EguiContexts, mut settings: ResMut<Settings>) {
 				});
 
 				ui.separator();
-				if ui.button("Save Settings").clicked() {
-					if let Err(e) = settings_ptr.save() {
-						error!("Failed to save settings: {}", e);
-					} else {
-						info!("Settings saved successfully");
-					}
-				}
+				settings_ptr.handle_save_operation_ui(ui, "Save Settings");
 			});
 
 		// Only mark as changed if settings actually changed

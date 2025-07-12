@@ -8,12 +8,15 @@ use bevy::{
 };
 use bevy_egui::EguiPlugin;
 
+mod alignment;
 mod camera;
 mod hud;
 mod pin;
+mod saveable;
 mod spatial;
 mod terrain;
 
+use crate::alignment::AlignmentPlugin;
 use crate::camera::CameraPlugin;
 use crate::pin::PinPlugin;
 use crate::terrain::TerrainPlugin;
@@ -31,17 +34,15 @@ fn main() {
 		.add_plugins(CameraPlugin)
 		.add_plugins(TerrainPlugin)
 		.add_plugins(PinPlugin)
+		.add_plugins(AlignmentPlugin)
 		.add_plugins(WireframePlugin::default())
 		.insert_resource(WireframeConfig {
 			global: false,
 			default_color: Color::srgb(1.0, 1.0, 1.0),
 		})
-		.add_systems(Startup, startup)
 		.add_systems(Update, (toggle_wireframe_system,))
 		.run();
 }
-
-fn startup() {}
 
 fn toggle_wireframe_system(
 	keyboard_input: Res<ButtonInput<KeyCode>>,
