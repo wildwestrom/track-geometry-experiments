@@ -69,6 +69,7 @@
                     wayland
                     alsa-lib
                     libudev-zero
+                    stdenv.cc.cc.lib
                   ];
               }
             ];
