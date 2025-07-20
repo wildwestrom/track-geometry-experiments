@@ -1,4 +1,4 @@
-use crate::spatial::{grid_to_world, world_size, world_size_for_height};
+use crate::spatial::{grid_to_world, world_size_for_height};
 use crate::saveable::SaveableSettings;
 use bevy::{
 	asset::RenderAssetUsages,

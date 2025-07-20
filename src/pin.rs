@@ -1,9 +1,9 @@
 use crate::{
 	camera::CameraMode,
-	spatial::{calculate_terrain_height, clamp_to_terrain_bounds, world_size, world_size_for_height},
+	spatial::{calculate_terrain_height, clamp_to_terrain_bounds, world_size_for_height},
 	terrain::{self, HeightMap, TerrainUpdateSet},
 };
-use bevy::{prelude::*, window::PrimaryWindow};
+use bevy::{gltf::GltfAssetLabel, prelude::*, window::PrimaryWindow};
 
 pub struct PinPlugin;
 
@@ -20,6 +20,7 @@ impl Plugin for PinPlugin {
 					update_cursor_world_pos,
 					update_dragged_pin_position,
 					cancel_drag_on_global_mouse_release,
+					scale_pins_by_distance,
 				),
 			)
 			.add_plugins(MeshPickingPlugin)
@@ -38,13 +39,6 @@ pub struct PinDragState {
 
 #[derive(Resource, Default, Debug, Clone, Copy)]
 pub struct CursorWorldPos(pub Option<Vec3>);
-
-const PINHEAD_RADIUS: f32 = 50_f32;
-const PIN_RADIUS: f32 = PINHEAD_RADIUS * (3.0 / 16.0);
-const PIN_HEIGHT: f32 = PINHEAD_RADIUS * 5.0;
-
-// This is so the pinhead sticks out above the terrain and is slightly nailed into the ground.
-const PIN_OFFSET: f32 = PIN_HEIGHT * 0.8;
 
 /// Performs ray-terrain intersection by stepping along the ray and checking heights
 fn raycast_terrain(
@@ -122,8 +116,7 @@ fn raycast_terrain(
 		let terrain_height = calculate_terrain_height(clamped_point, heightmap, settings);
 
 		// Check if ray point is at or below terrain height
-		// Offset the cylinder height so that the sphere always follows the mouse when dragging.
-		if point.y - PIN_OFFSET <= terrain_height {
+		if point.y <= terrain_height {
 			// Use clamped position for the result
 			return Some(Vec3::new(clamped_point.x, terrain_height, clamped_point.z));
 		}
@@ -142,47 +135,26 @@ fn raycast_terrain(
 
 pub fn create_pin(
 	commands: &mut Commands<'_, '_>,
-	meshes: &mut ResMut<'_, Assets<Mesh>>,
-	materials: &mut ResMut<'_, Assets<StandardMaterial>>,
+	asset_server: &Res<AssetServer>,
 	initial_position: Vec3,
-	pin_head_color: Color,
 	world_size: f32,
 	point_id: impl Component,
 ) {
-	let sphere_mesh = Sphere::new(PINHEAD_RADIUS).mesh().build();
-	let cylinder_mesh = Cylinder::new(PIN_RADIUS, PIN_HEIGHT).mesh().build();
+	// Load the GLB model - specify Scene 0 from the GLB file
+	let pin_scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset("pin.glb"));
 
-	// Create separate mesh handles
-	let sphere_handle = meshes.add(sphere_mesh);
-	let cylinder_handle = meshes.add(cylinder_mesh);
+	let final_position = initial_position * world_size;
 
-	// Create different materials
-	let sphere_material = materials.add(pin_head_color);
-	// Red sphere
-	let cylinder_material = materials.add(Color::srgb(0.8, 0.8, 0.8));
-	// Light gray cylinder
-
-	// Spawn the sphere (head) as the parent with the cylinder as a child
 	commands
 		.spawn((
-			Mesh3d(sphere_handle),
-			MeshMaterial3d(sphere_material),
-			Transform::from_xyz(0.0, 0.0, 0.0)
-				.with_translation(initial_position * world_size + Vec3::new(0.0, 0.0, 0.0)),
+			SceneRoot(pin_scene),
 			Pin,
 			point_id,
 			Pickable::default(),
+			Transform::from_translation(final_position).with_scale(Vec3::splat(4.0)), // Add extra scale to compensate for small GLTF
 		))
 		.observe(on_pin_drag_start)
-		.observe(on_pin_drag_end)
-		.with_children(|parent| {
-			parent.spawn((
-				Mesh3d(cylinder_handle),
-				MeshMaterial3d(cylinder_material),
-				Transform::from_xyz(0.0, -PIN_HEIGHT * 0.5, 0.0), // Position cylinder below sphere
-				Pickable::default(),
-			));
-		});
+		.observe(on_pin_drag_end);
 }
 
 fn move_pins_above_terrain(
@@ -204,8 +176,8 @@ fn move_pins_above_terrain(
 			let terrain_height =
 				calculate_terrain_height(transform.translation, heightmap, &settings);
 
-			// Position the base at ground level - the sphere will follow as a child
-			transform.translation.y = terrain_height + PIN_OFFSET;
+			// Position the base so its bottom sits on the terrain surface
+			transform.translation.y = terrain_height;
 		}
 	} else {
 		warn!("No heightmap found");
@@ -278,10 +250,10 @@ pub fn update_dragged_pin_position(
 				// Clamp position to terrain bounds
 				let clamped_pos = clamp_to_terrain_bounds(world_pos, &settings);
 
-				// Position pin so the sphere (head) is above the terrain intersection point
+				// Position pin so its bottom sits on the terrain surface
 				pin_transform.translation.x = clamped_pos.x;
 				pin_transform.translation.z = clamped_pos.z;
-				pin_transform.translation.y = clamped_pos.y + PIN_OFFSET;
+				pin_transform.translation.y = clamped_pos.y;
 			}
 		}
 	}
@@ -297,6 +269,30 @@ fn cancel_drag_on_global_mouse_release(
 		camera_mode.enable_camera_movement();
 		drag_state.dragging_pin = None;
 		info!("Stopped dragging pin due to global mouse release");
+	}
+}
+
+/// System to scale pins based on their distance from the camera
+fn scale_pins_by_distance(
+	mut pin_query: Query<&mut Transform, With<Pin>>,
+	camera_query: Query<&GlobalTransform, With<bevy_panorbit_camera::PanOrbitCamera>>,
+) {
+	if let Ok(camera_transform) = camera_query.single() {
+		let camera_pos = camera_transform.translation();
+
+		let reference_distance = 5000.0; // Distance at which pins have base scale
+		let base_scale = 1.0; // Blender by default makes things really small for some reason
+		let min_scale = 0.5;
+
+		for mut pin_transform in pin_query.iter_mut() {
+			let distance = camera_pos.distance(pin_transform.translation);
+
+			// Calculate scale factor based on distance
+			// As distance increases, scale increases to maintain visual size
+			let scale_factor = (distance / reference_distance * base_scale).max(min_scale);
+
+			pin_transform.scale = Vec3::splat(scale_factor);
+		}
 	}
 }
 
