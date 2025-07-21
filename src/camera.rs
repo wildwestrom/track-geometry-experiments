@@ -42,7 +42,7 @@ fn setup(mut commands: Commands, settings: Res<crate::terrain::Settings>) {
 			..default()
 		},
 		RenderLayers::layer(0),
-		PanOrbitCamera { ..default() },
+		PanOrbitCamera::default(),
 	));
 
 	commands.spawn((

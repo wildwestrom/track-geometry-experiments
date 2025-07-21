@@ -1,5 +1,5 @@
-use crate::spatial::{grid_to_world, world_size_for_height};
 use crate::saveable::SaveableSettings;
+use crate::spatial::{grid_to_world, world_size_for_height};
 use bevy::{
 	asset::RenderAssetUsages,
 	prelude::*,
@@ -103,7 +103,7 @@ fn load_settings() -> Settings {
 struct NoiseTexture;
 
 #[derive(Component)]
-struct TerrainMesh;
+pub struct TerrainMesh;
 
 /// Contains computed terrain dimensions and generation methods
 struct TerrainGenerator {
@@ -217,8 +217,9 @@ impl TerrainGenerator {
 		for z in 0..=self.grid_z {
 			for x in 0..=self.grid_x {
 				let world_pos = grid_to_world(x, z, settings);
-				let y_pos =
-					self.height_map.get(x, z) * world_size_for_height(settings) * self.height_multiplier;
+				let y_pos = self.height_map.get(x, z)
+					* world_size_for_height(settings)
+					* self.height_multiplier;
 
 				positions.push([world_pos.x, y_pos, world_pos.z]);
 				uvs.push([x as f32 / self.grid_x as f32, z as f32 / self.grid_z as f32]);

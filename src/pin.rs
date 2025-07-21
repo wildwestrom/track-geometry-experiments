@@ -19,15 +19,11 @@ impl Plugin for PinPlugin {
 					// This is to make sure when we grab a point from the heightmap
 					// we're always indexing the array within the bounds of the heightmap.
 					move_pins_above_terrain.after(TerrainUpdateSet),
-					update_cursor_world_pos,
-					update_dragged_pin_position,
-					cancel_drag_on_global_mouse_release,
 					scale_pins_by_distance,
 				),
 			)
 			.add_plugins(MeshPickingPlugin)
-			.insert_resource(PinDragState::default())
-			.insert_resource(CursorWorldPos::default());
+			.insert_resource(PinDragState::default());
 	}
 }
 
@@ -38,9 +34,6 @@ pub struct Pin;
 pub struct PinDragState {
 	dragging_pin: Option<Entity>,
 }
-
-#[derive(Resource, Default, Debug, Clone, Copy)]
-pub struct CursorWorldPos(pub Option<Vec3>);
 
 /// Performs ray-terrain intersection by stepping along the ray and checking heights
 fn raycast_terrain(
@@ -188,6 +181,7 @@ pub fn create_pin(
 			))
 			.observe(on_pin_drag_start)
 			.observe(on_pin_drag_end)
+			.observe(on_pin_drag_update)
 			.with_children(|parent| {
 				parent.spawn((
 					Mesh3d(needle_mesh),
@@ -242,32 +236,42 @@ fn on_pin_drag_start(
 	camera_mode.disable_camera_movement();
 }
 
-/// System to update the world position under the cursor every frame
-fn update_cursor_world_pos(
+/// Observer to update pin position when dragging (combines cursor raycast + position update)
+fn on_pin_drag_update(
+	trigger: Trigger<Pointer<Drag>>,
 	windows: Query<&Window, With<PrimaryWindow>>,
 	camera_query: Query<(&Camera, &GlobalTransform), With<bevy_panorbit_camera::PanOrbitCamera>>,
 	terrain_heightmap: Query<&HeightMap>,
 	settings: Res<terrain::Settings>,
-	mut cursor_world_pos: ResMut<CursorWorldPos>,
+	mut pin_query: Query<&mut Transform, With<Pin>>,
+	drag_state: Res<PinDragState>,
 ) {
-	let window = if let Ok(window) = windows.single() {
-		window
+	// Only update if this entity is currently being dragged
+	if let Some(dragging_entity) = drag_state.dragging_pin {
+		if dragging_entity != trigger.target() {
+			return;
+		}
 	} else {
+		return;
+	}
+
+	// Get the pin transform for the dragged entity
+	let Ok(mut pin_transform) = pin_query.get_mut(trigger.target()) else {
+		return;
+	};
+
+	let Ok(window) = windows.single() else {
 		return;
 	};
 	let Some(cursor_pos) = window.cursor_position() else {
-		cursor_world_pos.0 = None;
 		return;
 	};
-	let (camera, camera_transform) = if let Ok(val) = camera_query.single() {
-		val
-	} else {
+	let Ok((camera, camera_transform)) = camera_query.single() else {
 		return;
 	};
 
 	// Get the heightmap for terrain intersection
 	let Ok(heightmap) = terrain_heightmap.single() else {
-		cursor_world_pos.0 = None;
 		return;
 	};
 
@@ -275,44 +279,12 @@ fn update_cursor_world_pos(
 	if let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_pos) {
 		// Perform ray-terrain intersection by stepping along the ray
 		if let Some(intersection) = raycast_terrain(&ray, heightmap, &settings) {
-			cursor_world_pos.0 = Some(intersection);
-			return;
+			// Clamp position to terrain bounds and update pin position directly
+			let clamped_pos = clamp_to_terrain_bounds(intersection, &settings);
+			pin_transform.translation.x = clamped_pos.x;
+			pin_transform.translation.z = clamped_pos.z;
+			pin_transform.translation.y = clamped_pos.y;
 		}
-	}
-	cursor_world_pos.0 = None;
-}
-
-/// System to update the position of the currently dragged pin every frame
-pub fn update_dragged_pin_position(
-	drag_state: Res<PinDragState>,
-	mut pin_query: Query<&mut Transform, With<Pin>>,
-	cursor_world_pos: Res<CursorWorldPos>,
-	settings: Res<terrain::Settings>,
-) {
-	if let Some(dragging_entity) = drag_state.dragging_pin {
-		if let Ok(mut pin_transform) = pin_query.get_mut(dragging_entity) {
-			if let Some(world_pos) = cursor_world_pos.0 {
-				// Clamp position to terrain bounds
-				let clamped_pos = clamp_to_terrain_bounds(world_pos, &settings);
-
-				// Position pin so its bottom sits on the terrain surface
-				pin_transform.translation.x = clamped_pos.x;
-				pin_transform.translation.z = clamped_pos.z;
-				pin_transform.translation.y = clamped_pos.y;
-			}
-		}
-	}
-}
-
-/// System to cancel pin dragging if the mouse button is released anywhere
-fn cancel_drag_on_global_mouse_release(
-	mouse_buttons: Res<ButtonInput<MouseButton>>,
-	mut drag_state: ResMut<PinDragState>,
-	mut camera_mode: ResMut<CameraMode>,
-) {
-	if drag_state.dragging_pin.is_some() && mouse_buttons.just_released(MouseButton::Left) {
-		camera_mode.enable_camera_movement();
-		drag_state.dragging_pin = None;
 	}
 }
 
