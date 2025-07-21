@@ -142,19 +142,52 @@ fn draw_alignment_path(
 	point_a: Query<&Transform, With<PointA>>,
 	point_b: Query<&Transform, With<PointB>>,
 ) {
-	// Only draw for linear alignment (0 turns)
+	let Ok(a) = point_a.single() else { return };
+	let Ok(b) = point_b.single() else { return };
+
+	let start = a.translation;
+	let end = b.translation;
+
+	if !start.is_finite() || !end.is_finite() || start == end {
+		return;
+	}
+
+	// Draw linear alignment (0 turns)
 	if alignment_state.current == 0 {
-		let Ok(a) = point_a.single() else { return };
-		let Ok(b) = point_b.single() else { return };
+		gizmos.line(start, end, Color::srgb(0.5, 0.8, 1.0));
+		return;
+	}
 
-		let start = a.translation;
-		let end = b.translation;
+	// Draw multi-turn alignment (1+ turns)
+	if let Some(alignment) = alignment_state.alignments.get(&alignment_state.current) {
+		let segments = &alignment.segments;
 
-		if start.is_finite() && end.is_finite() && start != end {
-			gizmos.line(start, end, Color::srgb(0.5, 0.8, 1.0));
+		if segments.is_empty() {
+			return;
+		}
+
+		// Draw line from start to first tangent vertex
+		let first_vertex = segments[0].tangent_vertex;
+		if first_vertex.is_finite() {
+			gizmos.line(start, first_vertex, Color::srgb(0.5, 0.8, 1.0));
+		}
+
+		// Draw lines between consecutive tangent vertices
+		for i in 0..segments.len() - 1 {
+			let current_vertex = segments[i].tangent_vertex;
+			let next_vertex = segments[i + 1].tangent_vertex;
+
+			if current_vertex.is_finite() && next_vertex.is_finite() {
+				gizmos.line(current_vertex, next_vertex, Color::srgb(0.5, 0.8, 1.0));
+			}
+		}
+
+		// Draw line from last tangent vertex to end
+		let last_vertex = segments[segments.len() - 1].tangent_vertex;
+		if last_vertex.is_finite() {
+			gizmos.line(last_vertex, end, Color::srgb(0.5, 0.8, 1.0));
 		}
 	}
-	// TODO: Implement curved path visualization for N > 0 turns
 }
 
 fn ui(
