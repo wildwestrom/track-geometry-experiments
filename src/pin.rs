@@ -3,7 +3,12 @@ use crate::{
 	spatial::{calculate_terrain_height, clamp_to_terrain_bounds, world_size_for_height},
 	terrain::{self, HeightMap, TerrainUpdateSet},
 };
-use bevy::{gltf::GltfAssetLabel, prelude::*, window::PrimaryWindow};
+use bevy::{
+	gltf::{GltfAssetLabel, GltfMaterialName},
+	prelude::*,
+	scene::SceneInstanceReady,
+	window::PrimaryWindow,
+};
 
 pub struct PinPlugin;
 
@@ -24,6 +29,7 @@ impl Plugin for PinPlugin {
 				),
 			)
 			.add_plugins(MeshPickingPlugin)
+			.add_observer(change_pinhead_color)
 			.insert_resource(PinDragState::default())
 			.insert_resource(CursorWorldPos::default());
 	}
@@ -31,6 +37,9 @@ impl Plugin for PinPlugin {
 
 #[derive(Component)]
 pub struct Pin;
+
+#[derive(Component)]
+pub struct PinheadColor(pub Color);
 
 #[derive(Resource, Default)]
 pub struct PinDragState {
@@ -139,8 +148,8 @@ pub fn create_pin(
 	initial_position: Vec3,
 	world_size: f32,
 	point_id: impl Component,
+	pinhead_color: Color,
 ) {
-	// Load the GLB model - specify Scene 0 from the GLB file
 	let pin_scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset("pin.glb"));
 
 	let final_position = initial_position * world_size;
@@ -151,10 +160,40 @@ pub fn create_pin(
 			Pin,
 			point_id,
 			Pickable::default(),
-			Transform::from_translation(final_position).with_scale(Vec3::splat(4.0)), // Add extra scale to compensate for small GLTF
+			Transform::from_translation(final_position),
+			PinheadColor(pinhead_color),
 		))
 		.observe(on_pin_drag_start)
 		.observe(on_pin_drag_end);
+}
+
+/// Observer function to handle pinhead color changes when a pin scene is instantiated
+fn change_pinhead_color(
+	scene_ready_trigger: Trigger<SceneInstanceReady>,
+	mut commands: Commands,
+	scene_children: Query<&Children>,
+	color_override: Query<&PinheadColor>,
+	material_query: Query<(&MeshMaterial3d<StandardMaterial>, &GltfMaterialName)>,
+	mut asset_materials: ResMut<Assets<StandardMaterial>>,
+) {
+	let Ok(pinhead_color) = color_override.get(scene_ready_trigger.target()) else {
+		return;
+	};
+
+	for descendant in scene_children.iter_descendants(scene_ready_trigger.target()) {
+		if let Ok((material_handle, material_name)) = material_query.get(descendant) {
+			if material_name.0 == "pinhead" {
+				if let Some(material) = asset_materials.get(material_handle.id()) {
+					let mut new_material = material.clone();
+					new_material.base_color = pinhead_color.0;
+
+					commands
+						.entity(descendant)
+						.insert(MeshMaterial3d(asset_materials.add(new_material)));
+				}
+			}
+		}
+	}
 }
 
 fn move_pins_above_terrain(
@@ -190,7 +229,6 @@ fn on_pin_drag_start(
 	mut drag_state: ResMut<PinDragState>,
 	mut camera_mode: ResMut<CameraMode>,
 ) {
-	info!("Started dragging pin {:?}", trigger.target());
 	drag_state.dragging_pin = Some(trigger.target());
 
 	// Disable camera movement while dragging
@@ -268,7 +306,6 @@ fn cancel_drag_on_global_mouse_release(
 	if drag_state.dragging_pin.is_some() && mouse_buttons.just_released(MouseButton::Left) {
 		camera_mode.enable_camera_movement();
 		drag_state.dragging_pin = None;
-		info!("Stopped dragging pin due to global mouse release");
 	}
 }
 
@@ -288,7 +325,6 @@ fn scale_pins_by_distance(
 
 			// Calculate scale factor based on distance
 			// As distance increases, scale increases to maintain visual size
-			let scale_factor = (distance / reference_distance * base_scale).max(min_scale);
 			let scale_factor = (distance / reference_distance).max(min_scale);
 			pin_transform.scale = Vec3::splat(scale_factor);
 		}
@@ -305,7 +341,6 @@ fn on_pin_drag_end(
 		if dragging_entity == trigger.target() {
 			camera_mode.enable_camera_movement();
 			drag_state.dragging_pin = None;
-			info!("Stopped dragging pin {:?}", trigger.target());
 		}
 	}
 }

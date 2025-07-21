@@ -98,7 +98,6 @@ fn update_intermediate_pins(
 			// Convert world coordinates to normalized coordinates for create_pin
 			let normalized_pos = segment.tangent_vertex / world_size;
 
-			// TODO: set the color to green
 			create_pin(
 				&mut commands,
 				&asset_server,
@@ -108,6 +107,7 @@ fn update_intermediate_pins(
 					alignment_turns: current_alignment,
 					segment_index: i,
 				},
+				Color::srgb(0.0, 1.0, 0.0)
 			);
 		}
 	}
@@ -350,6 +350,7 @@ fn startup(
 		Vec3::new(0.45, 0.0, 0.0),
 		world_size,
 		PointA,
+		Color::srgb(1.0, 0.0, 0.0),
 	);
 	create_pin(
 		&mut commands,
@@ -357,6 +358,7 @@ fn startup(
 		Vec3::new(-0.45, 0.0, 0.0),
 		world_size,
 		PointB,
+		Color::srgb(0.0, 0.0, 1.0),
 	);
 }
 
