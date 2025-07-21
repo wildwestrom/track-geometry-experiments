@@ -280,9 +280,8 @@ fn scale_pins_by_distance(
 	if let Ok(camera_transform) = camera_query.single() {
 		let camera_pos = camera_transform.translation();
 
-		let reference_distance = 5000.0; // Distance at which pins have base scale
-		let base_scale = 1.0; // Blender by default makes things really small for some reason
-		let min_scale = 0.5;
+		let reference_distance = 3000.0; // Distance at which pins have base scale
+		let min_scale = 1.0;
 
 		for mut pin_transform in pin_query.iter_mut() {
 			let distance = camera_pos.distance(pin_transform.translation);
@@ -290,7 +289,7 @@ fn scale_pins_by_distance(
 			// Calculate scale factor based on distance
 			// As distance increases, scale increases to maintain visual size
 			let scale_factor = (distance / reference_distance * base_scale).max(min_scale);
-
+			let scale_factor = (distance / reference_distance).max(min_scale);
 			pin_transform.scale = Vec3::splat(scale_factor);
 		}
 	}
