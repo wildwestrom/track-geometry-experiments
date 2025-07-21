@@ -3,7 +3,9 @@ use crate::{
 	spatial::{calculate_terrain_height, clamp_to_terrain_bounds, world_size_for_height},
 	terrain::{self, HeightMap, TerrainUpdateSet},
 };
-use bevy::{gltf::GltfAssetLabel, prelude::*, render::render_resource::Face, window::PrimaryWindow};
+use bevy::{
+	gltf::GltfAssetLabel, prelude::*, render::render_resource::Face, window::PrimaryWindow,
+};
 
 pub struct PinPlugin;
 
@@ -163,16 +165,13 @@ pub fn create_pin(
 			)
 		};
 
-		let (needle_material, pinhead_material) = {
-			let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
-			let needle_material = materials.add(StandardMaterial::default());
-			let pinhead_material = materials.add(StandardMaterial {
-				base_color: pinhead_color,
-				cull_mode: Some(Face::Back),
-				..default()
-			});
-			(needle_material, pinhead_material)
-		};
+		let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
+		let needle_material = materials.add(StandardMaterial::default());
+		let pinhead_material = materials.add(StandardMaterial {
+			base_color: pinhead_color,
+			cull_mode: Some(Face::Back),
+			..default()
+		});
 
 		let final_position = initial_position * world_size;
 
