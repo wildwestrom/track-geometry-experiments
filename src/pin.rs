@@ -3,12 +3,7 @@ use crate::{
 	spatial::{calculate_terrain_height, clamp_to_terrain_bounds, world_size_for_height},
 	terrain::{self, HeightMap, TerrainUpdateSet},
 };
-use bevy::{
-	gltf::{GltfAssetLabel, GltfMaterialName},
-	prelude::*,
-	scene::SceneInstanceReady,
-	window::PrimaryWindow,
-};
+use bevy::{gltf::GltfAssetLabel, prelude::*, window::PrimaryWindow};
 
 pub struct PinPlugin;
 
@@ -29,7 +24,6 @@ impl Plugin for PinPlugin {
 				),
 			)
 			.add_plugins(MeshPickingPlugin)
-			.add_observer(change_pinhead_color)
 			.insert_resource(PinDragState::default())
 			.insert_resource(CursorWorldPos::default());
 	}
@@ -37,9 +31,6 @@ impl Plugin for PinPlugin {
 
 #[derive(Component)]
 pub struct Pin;
-
-#[derive(Component)]
-pub struct PinheadColor(pub Color);
 
 #[derive(Resource, Default)]
 pub struct PinDragState {
@@ -142,57 +133,80 @@ fn raycast_terrain(
 	last_valid_point
 }
 
+/// Alternative pin creation using direct mesh loading instead of scenes
 pub fn create_pin(
-	commands: &mut Commands<'_, '_>,
-	asset_server: &Res<AssetServer>,
 	initial_position: Vec3,
 	world_size: f32,
 	point_id: impl Component,
 	pinhead_color: Color,
-) {
-	let pin_scene = asset_server.load(GltfAssetLabel::Scene(0).from_asset("pin.glb"));
-
-	let final_position = initial_position * world_size;
-
-	commands
-		.spawn((
-			SceneRoot(pin_scene),
-			Pin,
-			point_id,
-			Pickable::default(),
-			Transform::from_translation(final_position),
-			PinheadColor(pinhead_color),
-		))
-		.observe(on_pin_drag_start)
-		.observe(on_pin_drag_end);
-}
-
-/// Observer function to handle pinhead color changes when a pin scene is instantiated
-fn change_pinhead_color(
-	scene_ready_trigger: Trigger<SceneInstanceReady>,
-	mut commands: Commands,
-	scene_children: Query<&Children>,
-	color_override: Query<&PinheadColor>,
-	material_query: Query<(&MeshMaterial3d<StandardMaterial>, &GltfMaterialName)>,
-	mut asset_materials: ResMut<Assets<StandardMaterial>>,
-) {
-	let Ok(pinhead_color) = color_override.get(scene_ready_trigger.target()) else {
-		return;
-	};
-
-	for descendant in scene_children.iter_descendants(scene_ready_trigger.target()) {
-		if let Ok((material_handle, material_name)) = material_query.get(descendant) {
-			if material_name.0 == "pinhead" {
-				if let Some(material) = asset_materials.get(material_handle.id()) {
-					let mut new_material = material.clone();
-					new_material.base_color = pinhead_color.0;
-
-					commands
-						.entity(descendant)
-						.insert(MeshMaterial3d(asset_materials.add(new_material)));
+) -> impl Command {
+	move |world: &mut World| {
+		// Load both meshes from the GLTF primitives
+		let needle_mesh = {
+			let asset_server = world.resource::<AssetServer>();
+			asset_server.load(
+				GltfAssetLabel::Primitive {
+					mesh: 0,
+					primitive: 0,
 				}
-			}
-		}
+				.from_asset("pin.glb"),
+			)
+		};
+
+		let pinhead_mesh = {
+			let asset_server = world.resource::<AssetServer>();
+			asset_server.load(
+				GltfAssetLabel::Primitive {
+					mesh: 1,
+					primitive: 0,
+				}
+				.from_asset("pin.glb"),
+			)
+		};
+
+		// Create materials
+		let (needle_material, pinhead_material) = {
+			let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
+			let needle_material = materials.add(StandardMaterial::default());
+			let pinhead_material = materials.add(StandardMaterial {
+				base_color: pinhead_color,
+				cull_mode: None,    // Don't cull any faces
+				double_sided: true, // Render both sides
+				..default()
+			});
+			(needle_material, pinhead_material)
+		};
+
+		let final_position = initial_position * world_size;
+
+		// Spawn a parent entity with the pin components and children
+		world
+			.spawn((
+				Pin,
+				point_id,
+				Pickable::default(),
+				Transform::from_translation(final_position),
+				Visibility::default(),
+				InheritedVisibility::default(),
+				ViewVisibility::default(),
+			))
+			.observe(on_pin_drag_start)
+			.observe(on_pin_drag_end)
+			.with_children(|parent| {
+				// Spawn needle as child with default material
+				parent.spawn((
+					Mesh3d(needle_mesh),
+					MeshMaterial3d(needle_material),
+					Transform::default(),
+				));
+
+				// Spawn pinhead as child with custom colored material
+				parent.spawn((
+					Mesh3d(pinhead_mesh),
+					MeshMaterial3d(pinhead_material),
+					Transform::default(),
+				));
+			});
 	}
 }
 

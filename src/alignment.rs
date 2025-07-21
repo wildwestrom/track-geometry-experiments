@@ -67,7 +67,6 @@ fn update_alignment_from_pins(
 
 fn update_intermediate_pins(
 	mut commands: Commands,
-	asset_server: Res<AssetServer>,
 	alignment_state: Res<AlignmentState>,
 	existing_intermediate_pins: Query<Entity, With<IntermediatePoint>>,
 	settings: Res<terrain::Settings>,
@@ -98,17 +97,15 @@ fn update_intermediate_pins(
 			// Convert world coordinates to normalized coordinates for create_pin
 			let normalized_pos = segment.tangent_vertex / world_size;
 
-			create_pin(
-				&mut commands,
-				&asset_server,
+			commands.queue(create_pin(
 				normalized_pos,
 				world_size,
 				IntermediatePoint {
 					alignment_turns: current_alignment,
 					segment_index: i,
 				},
-				Color::srgb(0.0, 1.0, 0.0)
-			);
+				Color::srgb(0.0, 1.0, 0.0),
+			));
 		}
 	}
 }
@@ -337,29 +334,20 @@ fn load_alignment() -> AlignmentState {
 	settings
 }
 
-fn startup(
-	mut commands: Commands,
-	asset_server: Res<AssetServer>,
-	settings: Res<terrain::Settings>,
-) {
+fn startup(mut commands: Commands, settings: Res<terrain::Settings>) {
 	let world_size = world_size_for_height(&settings);
-	// TODO: set colors to red and blue
-	create_pin(
-		&mut commands,
-		&asset_server,
+	commands.queue(create_pin(
 		Vec3::new(0.45, 0.0, 0.0),
 		world_size,
 		PointA,
 		Color::srgb(1.0, 0.0, 0.0),
-	);
-	create_pin(
-		&mut commands,
-		&asset_server,
+	));
+	commands.queue(create_pin(
 		Vec3::new(-0.45, 0.0, 0.0),
 		world_size,
 		PointB,
 		Color::srgb(0.0, 0.0, 1.0),
-	);
+	));
 }
 
 fn update_pins_from_alignment_state(
