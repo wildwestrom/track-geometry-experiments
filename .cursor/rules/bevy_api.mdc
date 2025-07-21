@@ -1,5 +1,5 @@
 ---
-alwaysApply: false
+alwaysApply: true
 ---
 # Bevy API Rule
 
@@ -14,11 +14,41 @@ alwaysApply: false
 - When unsure about API usage, search the documentation first
 
 ## Common Issues to Avoid:
-- Using outdated component names (e.g., `NodeBundle` vs `Node`, `Query::get_single_mut()`, `Query::single_mut()`)
+- Using outdated component names (e.g., `NodeBundle` vs `Node`, `Query::get_single_mut()`, `Query::single_mut()`, `despawn_recursive()` vs `despawn()`)
+- Trying to import things that are not available (e.g. `Parent`)
 - Incorrect system parameter types
-- Wrong import paths
+- Wrong import paths (or importing things that are already in `bevy::prelude::*`)
 - Non-existent functions or methods
-- Incorrect enum variants
+
+## Relationships
+
+Before Bevy 0.16 we only had `Parent` and `Child` components we could use to express one way relationships.
+
+After 0.16 these were replaced with `ChildOf` and `Children` components. We got full on bidirectional relationships with the `Relationship` and `RelationshipTarget` components that we can use to create our own dynamic relationships.
+
+```
+/// This is a "relationship" component.
+/// Add it to an entity that "likes" another entity.
+#[derive(Component)]
+#[relationship(relationship_target = LikedBy)]
+struct Likes(pub Entity);
+
+/// This is the "relationship target" component.
+/// It will be automatically inserted and updated to contain
+/// all entities that currently "like" this entity.
+#[derive(Component, Deref)]
+#[relationship_target(relationship = Likes)]
+struct LikedBy(Vec<Entity>);
+
+// Later in your app
+let e1 = world.spawn_empty().id();
+let e2 = world.spawn(Likes(e1)).id();
+let e3 = world.spawn(Likes(e1)).id();
+
+// e1 is liked by e2 and e3 
+let liked_by = world.entity(e1).get::<LikedBy>().unwrap();
+assert_eq!(&**liked_by, &[e2, e3]);
+```
 
 ## An example
 
