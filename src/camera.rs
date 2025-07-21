@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::render::view::RenderLayers;
 use bevy_panorbit_camera::*;
 use bevy_tweening::*;
 use std::f32::consts::PI;
@@ -40,6 +41,7 @@ fn setup(mut commands: Commands, settings: Res<crate::terrain::Settings>) {
 			order: 0,
 			..default()
 		},
+		RenderLayers::layer(0),
 		PanOrbitCamera { ..default() },
 	));
 
@@ -62,6 +64,7 @@ fn setup(mut commands: Commands, settings: Res<crate::terrain::Settings>) {
 			order: 1,
 			..default()
 		},
+		RenderLayers::layer(1),
 	));
 }
 

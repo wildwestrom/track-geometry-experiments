@@ -23,6 +23,7 @@ bevy = { version = "0.16.1", default-features = false, features = [
   "png",
   "bevy_scene",
   "bevy_gltf",
+  "bevy_gizmos",
   # # non-default-features as of 0.16.1
   # "dynamic_linking", # use during development
   "bevy_dev_tools",

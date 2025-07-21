@@ -1,5 +1,7 @@
+use bevy::gizmos::config::{GizmoConfigGroup, GizmoConfigStore};
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
+use bevy::render::view::RenderLayers;
 use bevy_egui::{EguiContexts, egui};
 use serde::{Deserialize, Serialize};
 
@@ -10,13 +12,18 @@ use crate::terrain;
 
 const MAX_TURNS: usize = 8;
 
+/// Gizmo configuration for alignment path visualization
+#[derive(Default, Reflect, GizmoConfigGroup)]
+pub struct AlignmentGizmos;
+
 pub struct AlignmentPlugin;
 
 impl Plugin for AlignmentPlugin {
 	fn build(&self, app: &mut App) {
 		app.insert_resource(load_alignment())
 			// .insert_resource(init_alignments())
-			.add_systems(Startup, startup)
+			.init_gizmo_group::<AlignmentGizmos>()
+			.add_systems(Startup, (startup, configure_gizmos))
 			.add_systems(PostStartup, update_pins_from_alignment_state)
 			.add_systems(
 				Update,
@@ -24,6 +31,7 @@ impl Plugin for AlignmentPlugin {
 					update_alignment_from_pins,
 					update_intermediate_pins,
 					update_alignment_from_intermediate_pins,
+					draw_alignment_path,
 				),
 			)
 			.add_systems(bevy_egui::EguiPrimaryContextPass, ui);
@@ -126,6 +134,27 @@ fn update_alignment_from_intermediate_pins(
 			}
 		}
 	}
+}
+
+fn draw_alignment_path(
+	mut gizmos: Gizmos<AlignmentGizmos>,
+	alignment_state: Res<AlignmentState>,
+	point_a: Query<&Transform, With<PointA>>,
+	point_b: Query<&Transform, With<PointB>>,
+) {
+	// Only draw for linear alignment (0 turns)
+	if alignment_state.current == 0 {
+		let Ok(a) = point_a.single() else { return };
+		let Ok(b) = point_b.single() else { return };
+
+		let start = a.translation;
+		let end = b.translation;
+
+		if start.is_finite() && end.is_finite() && start != end {
+			gizmos.line(start, end, Color::srgb(0.5, 0.8, 1.0));
+		}
+	}
+	// TODO: Implement curved path visualization for N > 0 turns
 }
 
 fn ui(
@@ -332,6 +361,12 @@ fn load_alignment() -> AlignmentState {
 	// Ensure draft_turns is always at least 1 to avoid conflict with linear alignment
 	settings.draft_turns = settings.draft_turns.max(1);
 	settings
+}
+
+fn configure_gizmos(mut config_store: ResMut<GizmoConfigStore>) {
+	let (config, _) = config_store.config_mut::<AlignmentGizmos>();
+	config.render_layers = RenderLayers::layer(0); // Only render on 3D camera
+	config.depth_bias = -1.0; // Show through terrain
 }
 
 fn startup(mut commands: Commands, settings: Res<terrain::Settings>) {
