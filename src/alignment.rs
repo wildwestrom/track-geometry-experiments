@@ -49,6 +49,12 @@ pub struct IntermediatePoint {
 	pub segment_index: usize,
 }
 
+fn configure_gizmos(mut config_store: ResMut<GizmoConfigStore>) {
+	let (config, _) = config_store.config_mut::<AlignmentGizmos>();
+	config.render_layers = RenderLayers::layer(0); // Only render on 3D camera
+	config.depth_bias = -1.0; // Show through terrain
+}
+
 fn update_alignment_from_pins(
 	point_a: Query<&Transform, With<PointA>>,
 	point_b: Query<&Transform, With<PointB>>,
@@ -394,12 +400,6 @@ fn load_alignment() -> AlignmentState {
 	// Ensure draft_turns is always at least 1 to avoid conflict with linear alignment
 	settings.draft_turns = settings.draft_turns.max(1);
 	settings
-}
-
-fn configure_gizmos(mut config_store: ResMut<GizmoConfigStore>) {
-	let (config, _) = config_store.config_mut::<AlignmentGizmos>();
-	config.render_layers = RenderLayers::layer(0); // Only render on 3D camera
-	config.depth_bias = -1.0; // Show through terrain
 }
 
 fn startup(mut commands: Commands, settings: Res<terrain::Settings>) {
