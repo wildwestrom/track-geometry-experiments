@@ -3,7 +3,7 @@ use crate::{
 	spatial::{calculate_terrain_height, clamp_to_terrain_bounds, world_size_for_height},
 	terrain::{self, HeightMap, TerrainUpdateSet},
 };
-use bevy::{gltf::GltfAssetLabel, prelude::*, window::PrimaryWindow};
+use bevy::{gltf::GltfAssetLabel, prelude::*, render::render_resource::Face, window::PrimaryWindow};
 
 pub struct PinPlugin;
 
@@ -133,7 +133,6 @@ fn raycast_terrain(
 	last_valid_point
 }
 
-/// Alternative pin creation using direct mesh loading instead of scenes
 pub fn create_pin(
 	initial_position: Vec3,
 	world_size: f32,
@@ -164,14 +163,12 @@ pub fn create_pin(
 			)
 		};
 
-		// Create materials
 		let (needle_material, pinhead_material) = {
 			let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
 			let needle_material = materials.add(StandardMaterial::default());
 			let pinhead_material = materials.add(StandardMaterial {
 				base_color: pinhead_color,
-				cull_mode: None,    // Don't cull any faces
-				double_sided: true, // Render both sides
+				cull_mode: Some(Face::Back),
 				..default()
 			});
 			(needle_material, pinhead_material)
@@ -193,14 +190,11 @@ pub fn create_pin(
 			.observe(on_pin_drag_start)
 			.observe(on_pin_drag_end)
 			.with_children(|parent| {
-				// Spawn needle as child with default material
 				parent.spawn((
 					Mesh3d(needle_mesh),
 					MeshMaterial3d(needle_material),
 					Transform::default(),
 				));
-
-				// Spawn pinhead as child with custom colored material
 				parent.spawn((
 					Mesh3d(pinhead_mesh),
 					MeshMaterial3d(pinhead_material),
