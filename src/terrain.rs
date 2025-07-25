@@ -100,9 +100,6 @@ fn load_settings() -> Settings {
 }
 
 #[derive(Component)]
-struct NoiseTexture;
-
-#[derive(Component)]
 pub struct TerrainMesh;
 
 /// Contains computed terrain dimensions and generation methods
@@ -404,7 +401,23 @@ fn render_noise_config_ui(ui: &mut egui::Ui, settings: &mut Settings) {
     );
 }
 
-fn ui_system(mut contexts: EguiContexts, mut settings: ResMut<Settings>) {
+#[derive(Resource, Clone)]
+pub struct NoiseTextureResource {
+    pub handle: Handle<Image>,
+    pub width: f32,
+    pub height: f32,
+}
+
+fn ui_system(
+    mut contexts: EguiContexts,
+    mut settings: ResMut<Settings>,
+    noise_texture_res: Option<Res<NoiseTextureResource>>,
+) {
+    // Get the texture_id before borrowing ctx_mut
+    let texture_id = noise_texture_res
+        .as_ref()
+        .map(|res| contexts.add_image(res.handle.clone()));
+
     if let Ok(ctx) = contexts.ctx_mut() {
         // Create a snapshot of current settings to detect actual changes
         let settings_snapshot = settings.clone();
@@ -413,7 +426,7 @@ fn ui_system(mut contexts: EguiContexts, mut settings: ResMut<Settings>) {
         let settings_ptr = settings.bypass_change_detection();
 
         egui::Window::new("Terrain Controls")
-            .default_pos((10.0, 100.0))
+            .default_pos(egui::pos2(10.0, 100.0))
             .show(ctx, |ui| {
                 ui.collapsing("Terrain Configuration", |ui| {
                     render_terrain_config_ui(ui, settings_ptr);
@@ -421,10 +434,37 @@ fn ui_system(mut contexts: EguiContexts, mut settings: ResMut<Settings>) {
                 ui.collapsing("Noise Parameters:", |ui| {
                     render_noise_config_ui(ui, settings_ptr);
                 });
-
                 ui.separator();
                 settings_ptr.handle_save_operation_ui(ui, "Save Settings");
             });
+
+        if let Some(texture_id) = texture_id {
+            let image_width = noise_texture_res.as_ref().unwrap().width;
+            let image_height = noise_texture_res.as_ref().unwrap().height;
+            let aspect_ratio = image_width / image_height;
+
+            egui::Window::new("Noise Preview")
+                .default_pos(egui::pos2(300.0, 100.0))
+                .resizable(true)
+                .show(ctx, |ui| {
+                    let available = ui.available_size();
+                    let avail_aspect = available.x / available.y;
+
+                    let (draw_width, draw_height) = if avail_aspect > aspect_ratio {
+                        // Available area is wider than image: fit by height
+                        let h = available.y;
+                        let w = h * aspect_ratio;
+                        (w, h)
+                    } else {
+                        // Available area is taller than image: fit by width
+                        let w = available.x;
+                        let h = w / aspect_ratio;
+                        (w, h)
+                    };
+
+                    ui.image((texture_id, egui::vec2(draw_width, draw_height)));
+                });
+        }
 
         // Only mark as changed if settings actually changed
         if *settings_ptr != settings_snapshot {
@@ -451,26 +491,19 @@ fn setup_terrain(
         height_map,
     ));
 
-    // Spawn noise texture preview
-    commands.spawn((
-        ImageNode::new(texture_handle),
-        NoiseTexture,
-        Node {
-            justify_self: JustifySelf::End,
-            align_self: AlignSelf::Start,
-            width: Val::Px(preview_width),
-            height: Val::Px(preview_height),
-            padding: UiRect::all(Val::Px(10.0)),
-            ..default()
-        },
-    ));
+    // Store the noise texture handle as a resource for egui
+    commands.insert_resource(NoiseTextureResource {
+        handle: texture_handle,
+        width: preview_width,
+        height: preview_height,
+    });
 }
 
 fn update_terrain(
-    mut noise_texture_query: Query<(&mut ImageNode, &mut Node), With<NoiseTexture>>,
     mut images: ResMut<Assets<Image>>,
     mut terrain_query: Query<(&mut Mesh3d, &mut HeightMap), With<TerrainMesh>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut noise_texture_res: ResMut<NoiseTextureResource>,
     settings: Res<Settings>,
 ) {
     if settings.is_changed() {
@@ -495,18 +528,12 @@ fn update_terrain(
             meshes.remove(old_mesh_id);
         }
 
-        // Replace the noise texture entity
-        if let Ok((mut image_handle, mut node)) = noise_texture_query.single_mut() {
-            let old_image_id = image_handle.image.id();
-
-            // Create new texture and update the handle
-            *image_handle = ImageNode::new(images.add(new_texture));
-            node.width = Val::Px(preview_width);
-            node.height = Val::Px(preview_height);
-
-            // Remove the old texture asset before creating a new one
-            images.remove(old_image_id);
-        }
+        // Update the noise texture resource
+        let old_image_id = noise_texture_res.handle.id();
+        noise_texture_res.handle = images.add(new_texture);
+        noise_texture_res.width = preview_width;
+        noise_texture_res.height = preview_height;
+        images.remove(old_image_id);
     }
 }
 
