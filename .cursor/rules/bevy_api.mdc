@@ -1,5 +1,6 @@
 ---
-alwaysApply: true
+description: Any time bevy is being used
+alwaysApply: false
 ---
 # Bevy API Rule
 
