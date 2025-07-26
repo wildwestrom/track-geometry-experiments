@@ -1,3 +1,4 @@
+use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
 use bevy::{
 	prelude::*,
@@ -36,6 +37,7 @@ fn main() {
 		.add_plugins(PinPlugin)
 		.add_plugins(AlignmentPlugin)
 		.add_plugins(WireframePlugin::default())
+        .add_plugins(FrameTimeDiagnosticsPlugin::default())
 		.insert_resource(WireframeConfig {
 			global: false,
 			default_color: Color::srgb(1.0, 1.0, 1.0),
