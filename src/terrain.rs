@@ -1,3 +1,4 @@
+use crate::alignment::AlignmentState;
 use crate::saveable::SaveableSettings;
 use crate::spatial::{grid_to_world, world_size_for_height};
 use bevy::{
@@ -22,7 +23,8 @@ impl Plugin for TerrainPlugin {
         app.insert_resource(load_settings())
             .add_systems(Startup, setup_terrain)
             .add_systems(Update, update_terrain.in_set(TerrainUpdateSet))
-            .add_systems(bevy_egui::EguiPrimaryContextPass, ui_system);
+            .add_systems(bevy_egui::EguiPrimaryContextPass, ui_system)
+            .add_systems(Update, update_plot_texture.after(ui_system));
     }
 }
 
@@ -408,15 +410,26 @@ pub struct NoiseTextureResource {
     pub height: f32,
 }
 
+#[derive(Resource, Clone)]
+pub struct PlotTextureResource {
+    pub handle: Handle<Image>,
+    pub width: f32,
+    pub height: f32,
+}
+
+#[derive(Resource, Clone, Debug, PartialEq)]
+pub struct PlotWidth(pub usize);
+
 fn ui_system(
     mut contexts: EguiContexts,
     mut settings: ResMut<Settings>,
-    noise_texture_res: Option<Res<NoiseTextureResource>>,
+    noise_texture_res: Res<NoiseTextureResource>,
+    plot_texture_res: Res<PlotTextureResource>,
+    mut plot_width: ResMut<PlotWidth>,
 ) {
     // Get the texture_id before borrowing ctx_mut
-    let texture_id = noise_texture_res
-        .as_ref()
-        .map(|res| contexts.add_image(res.handle.clone()));
+    let texture_id = contexts.add_image(noise_texture_res.handle.clone());
+    let plot_texture_id = contexts.add_image(plot_texture_res.handle.clone());
 
     if let Ok(ctx) = contexts.ctx_mut() {
         // Create a snapshot of current settings to detect actual changes
@@ -438,33 +451,47 @@ fn ui_system(
                 settings_ptr.handle_save_operation_ui(ui, "Save Settings");
             });
 
-        if let Some(texture_id) = texture_id {
-            let image_width = noise_texture_res.as_ref().unwrap().width;
-            let image_height = noise_texture_res.as_ref().unwrap().height;
-            let aspect_ratio = image_width / image_height;
+        let image_width = noise_texture_res.width;
+        let image_height = noise_texture_res.height;
+        let aspect_ratio = image_width / image_height;
 
-            egui::Window::new("Noise Preview")
-                .default_pos(egui::pos2(300.0, 100.0))
-                .resizable(true)
-                .show(ctx, |ui| {
-                    let available = ui.available_size();
-                    let avail_aspect = available.x / available.y;
+        egui::Window::new("Visualizations")
+            .default_pos(egui::pos2(300.0, 100.0))
+            .vscroll(true)
+            .show(ctx, |ui| {
+                let available = ui.available_size();
+                let avail_aspect = available.x / available.y;
 
-                    let (draw_width, draw_height) = if avail_aspect > aspect_ratio {
-                        // Available area is wider than image: fit by height
-                        let h = available.y;
-                        let w = h * aspect_ratio;
-                        (w, h)
-                    } else {
-                        // Available area is taller than image: fit by width
-                        let w = available.x;
-                        let h = w / aspect_ratio;
-                        (w, h)
-                    };
+                let (draw_width, draw_height) = if avail_aspect > aspect_ratio {
+                    // Available area is wider than image: fit by height
+                    let h = available.y;
+                    let w = h * aspect_ratio;
+                    (w, h)
+                } else {
+                    // Available area is taller than image: fit by width
+                    let w = available.x;
+                    let h = w / aspect_ratio;
+                    (w, h)
+                };
 
-                    ui.image((texture_id, egui::vec2(draw_width, draw_height)));
-                });
-        }
+                ui.label("Noise Texture");
+                ui.image((texture_id, egui::vec2(draw_width, draw_height)));
+                let plot_width_pixels = available.x as usize;
+                if plot_width_pixels != plot_width.0 {
+                    plot_width.0 = plot_width_pixels;
+                }
+                let plot_width_f = plot_texture_res.as_ref().width;
+                let plot_height_f = plot_texture_res.as_ref().height;
+                let plot_aspect = plot_width_f / plot_height_f;
+                let plot_draw_width = draw_width;
+                let plot_draw_height = draw_width / plot_aspect;
+
+                ui.label("Elevation Profile");
+                ui.image((
+                    plot_texture_id,
+                    egui::vec2(plot_draw_width, plot_draw_height),
+                ));
+            });
 
         // Only mark as changed if settings actually changed
         if *settings_ptr != settings_snapshot {
@@ -497,6 +524,77 @@ fn setup_terrain(
         width: preview_width,
         height: preview_height,
     });
+
+    // Set initial plot width resource (default to 256)
+    commands.insert_resource(PlotWidth(256));
+}
+
+// TODO: Replace with bevy_prototype_lyon for better 2d drawing
+fn update_plot_texture(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    plot_width: Res<PlotWidth>,
+    alignment_state: Option<Res<AlignmentState>>,
+) {
+    let plot_width = plot_width.0;
+    let plot_height = plot_width / 8;
+    let mut plot_data = Vec::with_capacity(plot_width * plot_height * 4);
+    for _ in 0..(plot_width * plot_height) {
+        plot_data.extend_from_slice(&[0, 0, 0, 255]); // Black
+    }
+    let mut has_profile = false;
+    if let Some(alignment_state) = alignment_state {
+        if let Some(alignment) = alignment_state.alignments.get(&alignment_state.current) {
+            let samples = alignment.sample_elevation_profile(plot_width);
+            if !samples.is_empty() {
+                has_profile = true;
+                // Find min/max height for normalization
+                let min_h = samples
+                    .iter()
+                    .map(|&(_, h)| h)
+                    .fold(f32::INFINITY, f32::min);
+                let max_h = samples
+                    .iter()
+                    .map(|&(_, h)| h)
+                    .fold(f32::NEG_INFINITY, f32::max);
+                let height_range = (max_h - min_h).max(1e-5);
+                // Draw polyline
+                for (i, &(_, h)) in samples.iter().enumerate() {
+                    let x = i;
+                    let norm_h = (h - min_h) / height_range;
+                    let y = ((1.0 - norm_h) * (plot_height as f32 - 1.0)).round() as usize;
+                    if x < plot_width && y < plot_height {
+                        let idx = (y * plot_width + x) * 4;
+                        plot_data[idx..idx + 4].copy_from_slice(&[255, 0, 0, 255]); // Red pixel
+                    }
+                }
+            }
+        }
+    }
+    if !has_profile {
+        plot_data.clear();
+        for _ in 0..(plot_width * plot_height) {
+            plot_data.extend_from_slice(&[0, 0, 0, 255]);
+        }
+    }
+    let plot_image = Image::new_fill(
+        Extent3d {
+            width: plot_width as u32,
+            height: plot_height as u32,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &plot_data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::all(),
+    );
+    let plot_handle = images.add(plot_image);
+    let plot_res = PlotTextureResource {
+        handle: plot_handle,
+        width: plot_width as f32,
+        height: plot_height as f32,
+    };
+    commands.insert_resource(plot_res);
 }
 
 fn update_terrain(
