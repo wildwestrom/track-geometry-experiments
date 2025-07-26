@@ -11,7 +11,8 @@ impl Plugin for CameraDebugHud {
     fn build(&self, app: &mut App) {
         app.init_resource::<HudText>()
             .add_systems(Startup, setup_hud)
-            .add_systems(Update, (update_hud, update_ui_text));
+            .add_systems(Update, (update_hud, update_ui_text))
+            .add_plugins(FrameTimeDiagnosticsPlugin::default());
     }
 }
 

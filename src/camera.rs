@@ -4,7 +4,6 @@ use bevy_panorbit_camera::*;
 use bevy_tweening::*;
 use std::f32::consts::PI;
 
-use crate::hud::CameraDebugHud;
 use crate::spatial::world_size;
 
 pub struct CameraPlugin;
@@ -13,7 +12,7 @@ impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(PanOrbitCameraPlugin)
             .add_plugins(TweeningPlugin)
-            .add_plugins(CameraDebugHud)
+            // .add_plugins(crate::hud::CameraDebugHud)
             .insert_resource(CameraMode::default())
             .add_systems(Startup, setup)
             .add_systems(
