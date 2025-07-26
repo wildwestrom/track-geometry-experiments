@@ -4,7 +4,11 @@ use crate::{
     terrain::{self, HeightMap, TerrainUpdateSet, raycast_terrain},
 };
 use bevy::{
-    gltf::GltfAssetLabel, prelude::*, render::render_resource::Face, window::PrimaryWindow,
+    gltf::GltfAssetLabel,
+    picking::{Pickable, mesh_picking::MeshPickingPlugin},
+    prelude::*,
+    render::render_resource::Face,
+    window::PrimaryWindow,
 };
 
 pub struct PinPlugin;
