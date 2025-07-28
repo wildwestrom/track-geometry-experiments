@@ -57,6 +57,8 @@
                   cargo-watch
                   cargo-flamegraph
                   tracy-wayland
+                  valgrind-light
+                  heaptrack
                 ];
 
                 # Set up environment variables for Bevy/Wayland
