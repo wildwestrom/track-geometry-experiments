@@ -1,6 +1,8 @@
 use crate::alignment::AlignmentState;
 use crate::saveable::SaveableSettings;
-use crate::spatial::{calculate_terrain_height, clamp_to_terrain_bounds, grid_to_world, world_size_for_height};
+use crate::spatial::{
+    calculate_terrain_height, clamp_to_terrain_bounds, grid_to_world, world_size_for_height,
+};
 use crate::terrain;
 use bevy::{
     asset::RenderAssetUsages,
@@ -16,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 pub struct TerrainPlugin;
 
-#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub struct TerrainUpdateSet;
 
 impl Plugin for TerrainPlugin {
@@ -29,7 +31,7 @@ impl Plugin for TerrainPlugin {
     }
 }
 
-#[derive(Resource, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Resource, Serialize, Deserialize, PartialEq)]
 pub struct Settings {
     // Terrain settings
     pub base_grid_resolution: u32,
@@ -404,22 +406,29 @@ fn render_noise_config_ui(ui: &mut egui::Ui, settings: &mut Settings) {
     );
 }
 
-#[derive(Resource, Clone)]
+#[derive(Resource)]
 pub struct NoiseTextureResource {
     pub handle: Handle<Image>,
     pub width: f32,
     pub height: f32,
 }
 
-#[derive(Resource, Clone)]
+#[derive(Resource)]
 pub struct PlotTextureResource {
     pub handle: Handle<Image>,
     pub width: f32,
     pub height: f32,
 }
 
-#[derive(Resource, Clone, Debug, PartialEq)]
+#[derive(Resource, Debug, PartialEq)]
 pub struct PlotWidth(pub usize);
+
+#[derive(Resource)]
+pub struct PlotPixelBuffer {
+    buffer: Vec<u8>,
+    capacity_width: usize,
+    capacity_height: usize,
+}
 
 fn ui_system(
     mut contexts: EguiContexts,
@@ -433,14 +442,12 @@ fn ui_system(
     let plot_texture_id = contexts.add_image(plot_texture_res.handle.clone());
 
     if let Ok(ctx) = contexts.ctx_mut() {
-        // Create a snapshot of current settings to detect actual changes
-        let settings_snapshot = settings.clone();
-
         // Bypass change detection so we can manually control when changes are detected
         let settings_ptr = settings.bypass_change_detection();
 
         egui::Window::new("Terrain Controls")
-            .default_pos(egui::pos2(10.0, 100.0))
+            .default_pos(egui::pos2(0.0, 0.0))
+            .default_open(false)
             .show(ctx, |ui| {
                 ui.collapsing("Terrain Configuration", |ui| {
                     render_terrain_config_ui(ui, settings_ptr);
@@ -457,26 +464,20 @@ fn ui_system(
         let aspect_ratio = image_width / image_height;
 
         egui::Window::new("Visualizations")
-            .default_pos(egui::pos2(300.0, 100.0))
+            .default_pos(egui::pos2(2000.0, 0.0))
+            .default_open(false)
             .vscroll(true)
             .show(ctx, |ui| {
                 let available = ui.available_size();
-                let avail_aspect = available.x / available.y;
 
-                let (draw_width, draw_height) = if avail_aspect > aspect_ratio {
-                    // Available area is wider than image: fit by height
-                    let h = available.y;
-                    let w = h * aspect_ratio;
-                    (w, h)
-                } else {
-                    // Available area is taller than image: fit by width
-                    let w = available.x;
-                    let h = w / aspect_ratio;
-                    (w, h)
-                };
+                // Always fit by width since vertical scrolling is enabled
+                let w = available.x;
+                let h = w / aspect_ratio;
+                let (draw_width, draw_height) = (w, h);
 
                 ui.label("Noise Texture");
                 ui.image((texture_id, egui::vec2(draw_width, draw_height)));
+
                 let plot_width_pixels = available.x as usize;
                 if plot_width_pixels != plot_width.0 {
                     plot_width.0 = plot_width_pixels;
@@ -494,10 +495,9 @@ fn ui_system(
                 ));
             });
 
-        // Only mark as changed if settings actually changed
-        if *settings_ptr != settings_snapshot {
-            settings.set_changed();
-        }
+        // Mark as changed if any UI interaction occurred
+        // The bypass_change_detection() means we need to manually mark changes
+        settings.set_changed();
     }
 }
 
@@ -536,48 +536,150 @@ fn update_plot_texture(
     mut images: ResMut<Assets<Image>>,
     plot_width: Res<PlotWidth>,
     alignment_state: Option<Res<AlignmentState>>,
+    pixel_buffer: Option<ResMut<PlotPixelBuffer>>,
+    plot_texture_res: Option<Res<PlotTextureResource>>,
 ) {
     let plot_width = plot_width.0;
     let plot_height = plot_width / 8;
-    let mut plot_data = Vec::with_capacity(plot_width * plot_height * 4);
-    for _ in 0..(plot_width * plot_height) {
-        plot_data.extend_from_slice(&[0, 0, 0, 255]); // Black
+
+    if let Some(mut buffer_res) = pixel_buffer {
+        // Use existing buffer resource
+        let plot_data = prepare_plot_buffer(&mut buffer_res, plot_width, plot_height);
+
+        // Draw elevation profile if available
+        if let Some(alignment_state) = alignment_state {
+            draw_elevation_profile(&alignment_state, plot_data, plot_width, plot_height);
+        }
+
+        // Update the plot texture resource
+        update_plot_texture_resource(
+            &mut commands,
+            &mut images,
+            plot_texture_res,
+            plot_data,
+            plot_width,
+            plot_height,
+        );
+    } else {
+        // First time - create the buffer resource for next frame and use temp buffer this frame
+        create_initial_buffer_resource(&mut commands, plot_width, plot_height);
+        let mut temp_buffer = create_temp_plot_buffer(plot_width, plot_height);
+
+        // Draw elevation profile if available
+        if let Some(alignment_state) = alignment_state {
+            draw_elevation_profile(&alignment_state, &mut temp_buffer, plot_width, plot_height);
+        }
+
+        // Update the plot texture resource
+        update_plot_texture_resource(
+            &mut commands,
+            &mut images,
+            plot_texture_res,
+            &temp_buffer,
+            plot_width,
+            plot_height,
+        );
     }
-    let mut has_profile = false;
-    if let Some(alignment_state) = alignment_state {
-        if let Some(alignment) = alignment_state.alignments.get(&alignment_state.current) {
-            let samples = alignment.sample_elevation_profile(plot_width);
-            if !samples.is_empty() {
-                has_profile = true;
-                // Find min/max height for normalization
-                let min_h = samples
-                    .iter()
-                    .map(|&(_, h)| h)
-                    .fold(f32::INFINITY, f32::min);
-                let max_h = samples
-                    .iter()
-                    .map(|&(_, h)| h)
-                    .fold(f32::NEG_INFINITY, f32::max);
-                let height_range = (max_h - min_h).max(1e-5);
-                // Draw polyline
-                for (i, &(_, h)) in samples.iter().enumerate() {
-                    let x = i;
-                    let norm_h = (h - min_h) / height_range;
-                    let y = ((1.0 - norm_h) * (plot_height as f32 - 1.0)).round() as usize;
-                    if x < plot_width && y < plot_height {
-                        let idx = (y * plot_width + x) * 4;
-                        plot_data[idx..idx + 4].copy_from_slice(&[255, 0, 0, 255]); // Red pixel
-                    }
-                }
-            }
+}
+
+fn create_initial_buffer_resource(commands: &mut Commands, plot_width: usize, plot_height: usize) {
+    let buffer_size = plot_width * plot_height * 4;
+    let buffer_resource = PlotPixelBuffer {
+        buffer: vec![0u8; buffer_size],
+        capacity_width: plot_width,
+        capacity_height: plot_height,
+    };
+    commands.insert_resource(buffer_resource);
+}
+
+fn create_temp_plot_buffer(plot_width: usize, plot_height: usize) -> Vec<u8> {
+    let buffer_size = plot_width * plot_height * 4;
+    let mut temp_buffer = vec![0u8; buffer_size];
+
+    // Clear to black
+    for chunk in temp_buffer.chunks_exact_mut(4) {
+        chunk.copy_from_slice(&[0, 0, 0, 255]);
+    }
+
+    temp_buffer
+}
+
+fn prepare_plot_buffer(
+    buffer_res: &mut PlotPixelBuffer,
+    plot_width: usize,
+    plot_height: usize,
+) -> &mut Vec<u8> {
+    let buffer_size = plot_width * plot_height * 4;
+
+    // Resize buffer if dimensions changed
+    if buffer_res.capacity_width != plot_width || buffer_res.capacity_height != plot_height {
+        buffer_res.buffer.clear();
+        buffer_res.buffer.resize(buffer_size, 0);
+        buffer_res.capacity_width = plot_width;
+        buffer_res.capacity_height = plot_height;
+    }
+
+    // Clear to black
+    for chunk in buffer_res.buffer.chunks_exact_mut(4) {
+        chunk.copy_from_slice(&[0, 0, 0, 255]);
+    }
+
+    &mut buffer_res.buffer
+}
+
+fn draw_elevation_profile(
+    alignment_state: &AlignmentState,
+    plot_data: &mut [u8],
+    plot_width: usize,
+    plot_height: usize,
+) {
+    let Some(alignment) = alignment_state.alignments.get(&alignment_state.turns) else {
+        return;
+    };
+
+    let samples = alignment.sample_elevation_profile(plot_width);
+    if samples.is_empty() {
+        return;
+    }
+
+    // Find min/max height for normalization
+    let min_h = samples
+        .iter()
+        .map(|&(_, h)| h)
+        .fold(f32::INFINITY, f32::min);
+    let max_h = samples
+        .iter()
+        .map(|&(_, h)| h)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let height_range = (max_h - min_h).max(1e-5);
+
+    // Draw polyline
+    for (i, &(_, h)) in samples.iter().enumerate() {
+        let x = i;
+        let norm_h = (h - min_h) / height_range;
+        let y = ((1.0 - norm_h) * (plot_height as f32 - 1.0)).round() as usize;
+
+        if x < plot_width && y < plot_height {
+            let idx = (y * plot_width + x) * 4;
+            plot_data[idx..idx + 4].copy_from_slice(&[255, 0, 0, 255]); // Red pixel
         }
     }
-    if !has_profile {
-        plot_data.clear();
-        for _ in 0..(plot_width * plot_height) {
-            plot_data.extend_from_slice(&[0, 0, 0, 255]);
-        }
+}
+
+fn update_plot_texture_resource(
+    commands: &mut Commands,
+    images: &mut ResMut<Assets<Image>>,
+    plot_texture_res: Option<Res<PlotTextureResource>>,
+    plot_data: &[u8],
+    plot_width: usize,
+    plot_height: usize,
+) {
+    // Remove old image handle before creating new one
+    if let Some(old_plot_res) = plot_texture_res {
+        let old_image_id = old_plot_res.handle.id();
+        images.remove(old_image_id);
     }
+
     let plot_image = Image::new_fill(
         Extent3d {
             width: plot_width as u32,
@@ -585,11 +687,12 @@ fn update_plot_texture(
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        &plot_data,
+        plot_data,
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::all(),
     );
     let plot_handle = images.add(plot_image);
+
     let plot_res = PlotTextureResource {
         handle: plot_handle,
         width: plot_width as f32,

@@ -67,7 +67,7 @@ fn setup(mut commands: Commands, settings: Res<crate::terrain::Settings>) {
     ));
 }
 
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct CameraMode {
     current_mode: CameraState,
     pub is_transitioning: bool,
@@ -108,7 +108,7 @@ impl Default for CameraMode {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 enum CameraState {
     Perspective,
     Orthographic,
@@ -129,7 +129,7 @@ impl CameraState {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 struct DollyZoomLens {
     start_fov: f32,
     end_fov: f32,
@@ -159,7 +159,7 @@ impl Lens<Transform> for DollyZoomLens {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 struct PanOrbitCameraLens {
     start_fov: f32,
     end_fov: f32,
@@ -207,7 +207,7 @@ fn direction_to_spherical(direction: Vec3) -> (f32, f32) {
     (yaw, pitch)
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 struct ProjectionFovLens {
     start: f32,
     end: f32,

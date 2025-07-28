@@ -41,13 +41,13 @@ impl Plugin for AlignmentPlugin {
     }
 }
 
-#[derive(Component, Clone)]
+#[derive(Component)]
 pub struct AlignmentPoint {
     pub alignment_id: usize, // 0 for linear, 1+ for multi-turn alignments
     pub point_type: PointType,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(PartialEq, Debug)]
 pub enum PointType {
     Start,
     End,
@@ -80,7 +80,7 @@ fn update_alignment_from_pins(
     let mut end_pos = None;
 
     for (transform, alignment_point) in alignment_pins.iter() {
-        if alignment_point.alignment_id == alignment_state.current {
+        if alignment_point.alignment_id == alignment_state.turns {
             match alignment_point.point_type {
                 PointType::Start => start_pos = Some(transform.translation),
                 PointType::End => end_pos = Some(transform.translation),
@@ -111,7 +111,7 @@ fn update_alignment_pins(
     mut last_current_alignment: Local<Option<usize>>,
 ) {
     // Only update if the current alignment selection has changed
-    let current_alignment = alignment_state.current;
+    let current_alignment = alignment_state.turns;
     if *last_current_alignment == Some(current_alignment) {
         return;
     }
@@ -131,22 +131,24 @@ fn update_alignment_pins(
             alignment_id: current_alignment,
             point_type: PointType::Start,
         };
+        let start_color = start_point.get_color();
         commands.queue(create_pin(
             alignment.start / world_size,
             world_size,
-            start_point.clone(),
-            start_point.get_color(),
+            start_point,
+            start_color,
         ));
 
         let end_point = AlignmentPoint {
             alignment_id: current_alignment,
             point_type: PointType::End,
         };
+        let end_color = end_point.get_color();
         commands.queue(create_pin(
             alignment.end / world_size,
             world_size,
-            end_point.clone(),
-            end_point.get_color(),
+            end_point,
+            end_color,
         ));
 
         // Spawn intermediate pins for multi-turn alignments
@@ -158,11 +160,12 @@ fn update_alignment_pins(
                 alignment_id: current_alignment,
                 point_type: PointType::Intermediate { segment_index: i },
             };
+            let point_color = alignment_point.get_color();
             commands.queue(create_pin(
                 normalized_pos,
                 world_size,
-                alignment_point.clone(),
-                alignment_point.get_color(),
+                alignment_point,
+                point_color,
             ));
         }
     }
@@ -196,10 +199,11 @@ fn ui(
 ) {
     if let Ok(ctx) = contexts.ctx_mut() {
         egui::Window::new("Alignment Properties")
-            .default_pos((20.0, 225.0))
+            .default_pos((00.0, 35.0))
+            .default_open(false)
             .show(ctx, |ui| {
                 // Debug: show current alignment and pin count
-                ui.label(format!("Current alignment: {}", alignment_state.current));
+                ui.label(format!("Total turns: {}", alignment_state.turns));
                 ui.label(format!("Total pins: {}", alignment_pins.iter().count()));
 
                 // Get current start/end positions from pins
@@ -207,7 +211,7 @@ fn ui(
                 let mut end_pos = Vec3::ZERO;
 
                 for (transform, alignment_point) in alignment_pins.iter() {
-                    if alignment_point.alignment_id == alignment_state.current {
+                    if alignment_point.alignment_id == alignment_state.turns {
                         match alignment_point.point_type {
                             PointType::Start => {
                                 start_pos = transform.translation;
@@ -252,14 +256,14 @@ fn display_position(ui: &mut egui::Ui, label: &str, position: Vec3) {
 fn alignment_selection_ui(ui: &mut egui::Ui, alignment_state: &mut AlignmentState) {
     ui.label("Select Alignment:");
 
-    // Collect alignment keys and sort them, but skip 0 since it's shown as "Linear Alignment"
-    let mut alignment_keys: Vec<usize> = alignment_state.alignments.keys().cloned().collect();
+    // Use a more efficient approach: iterate directly over keys without cloning
+    let mut alignment_keys: Vec<&usize> = alignment_state.alignments.keys().collect();
     alignment_keys.sort();
 
-    for turns in alignment_keys {
+    for &turns in alignment_keys {
         let mut turns_str = turns.to_string();
         ui.radio_value(
-            &mut alignment_state.current,
+            &mut alignment_state.turns,
             turns,
             match turns {
                 0 => "Linear Alignment",
@@ -277,8 +281,8 @@ fn alignment_selection_ui(ui: &mut egui::Ui, alignment_state: &mut AlignmentStat
 }
 
 fn vertex_coordinates_ui(ui: &mut egui::Ui, alignment_state: &AlignmentState) {
-    if alignment_state.current > 0 {
-        if let Some(alignment) = alignment_state.alignments.get(&alignment_state.current) {
+    if alignment_state.turns > 0 {
+        if let Some(alignment) = alignment_state.alignments.get(&alignment_state.turns) {
             let segments: &[PathSegment] = &alignment.segments;
             ui.label("Vertices:");
             for (i, segment) in segments.iter().enumerate() {
@@ -335,24 +339,26 @@ fn alignment_creation_ui(
         if !alignment_state.alignments.contains_key(&draft_turns) {
             if ui.button("Add Alignment").clicked() {
                 alignment_state.add_alignment(draft_turns, start_pos, end_pos);
-                alignment_state.current = draft_turns;
+                alignment_state.turns = draft_turns;
             }
         }
     });
 }
 
-#[derive(Resource, Serialize, Deserialize, Clone)]
+type Turns = usize;
+
+#[derive(Resource, Serialize, Deserialize)]
 pub struct AlignmentState {
-    pub current: usize,
-    pub alignments: HashMap<usize, Alignment>,
+    pub turns: Turns,
+    pub alignments: HashMap<Turns, Alignment>,
     #[serde(skip)]
-    pub draft_turns: usize,
+    pub draft_turns: Turns,
 }
 
 impl Default for AlignmentState {
     fn default() -> Self {
         Self {
-            current: 0,
+            turns: 0,
             alignments: HashMap::new(),
             draft_turns: 1,
         }
@@ -366,7 +372,7 @@ impl AlignmentState {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct Alignment {
     pub start: Vec3,
     pub end: Vec3,
@@ -438,7 +444,7 @@ impl Alignment {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct PathSegment {
     pub tangent_vertex: Vec3,
     pub circular_section_radius: f32,
@@ -486,9 +492,9 @@ fn startup(mut alignment_state: ResMut<AlignmentState>, settings: Res<terrain::S
     // or if the loaded current alignment doesn't exist in the alignments map
     if !alignment_state
         .alignments
-        .contains_key(&alignment_state.current)
+        .contains_key(&alignment_state.turns)
     {
-        alignment_state.current = 0;
+        alignment_state.turns = 0;
     }
 }
 
@@ -502,7 +508,7 @@ fn update_pins_from_alignment_state(
         if alignment.start != Vec3::ZERO || alignment.end != Vec3::ZERO {
             for (mut transform, alignment_point) in alignment_pins.iter_mut() {
                 // Only update pins for the current alignment
-                if alignment_point.alignment_id == alignment_state.current {
+                if alignment_point.alignment_id == alignment_state.turns {
                     match alignment_point.point_type {
                         PointType::Start => {
                             transform.translation = alignment.start;
@@ -528,7 +534,7 @@ fn render_alignment_path(
     let mut end = None;
 
     for (transform, alignment_point) in alignment_pins.iter() {
-        if alignment_point.alignment_id == alignment_state.current {
+        if alignment_point.alignment_id == alignment_state.turns {
             match alignment_point.point_type {
                 PointType::Start => start = Some(transform.translation),
                 PointType::End => end = Some(transform.translation),
@@ -546,13 +552,13 @@ fn render_alignment_path(
     }
 
     // Draw linear alignment (0 turns)
-    if alignment_state.current == 0 {
+    if alignment_state.turns == 0 {
         gizmos.line(start, end, Color::srgb(0.5, 0.8, 1.0));
         return;
     }
 
     // Draw multi-turn alignment (1+ turns)
-    if let Some(alignment) = alignment_state.alignments.get(&alignment_state.current) {
+    if let Some(alignment) = alignment_state.alignments.get(&alignment_state.turns) {
         let segments = &alignment.segments;
 
         if segments.is_empty() {
