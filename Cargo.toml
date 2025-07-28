@@ -30,7 +30,7 @@ bevy = { version = "0.16.1", default-features = false, features = [
   "wayland",
   "serialize",
 ] }
-bevy_panorbit_camera = { version = "0.27.0", features = ["bevy_egui"] }
+bevy_panorbit_camera = { version = "0.26.0", features = ["bevy_egui"] } # For some reason my shit breaks on 0.27.0 and above
 bevy_egui = "0.35.1"
 log = { version = "0.4.27", features = [
   "max_level_debug",
@@ -41,6 +41,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
 bevy_tweening = "0.13.0"
+spec_math = "0.1.6"
 
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]
