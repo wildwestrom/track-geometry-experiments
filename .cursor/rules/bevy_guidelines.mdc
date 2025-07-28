@@ -1,0 +1,796 @@
+---
+description: Any time Bevy is being used
+alwaysApply: false
+---
+
+# Bevy Development Guidelines
+
+## Resources vs Components Decision Framework
+
+### Use Resources for:
+- **Global singleton data** (game settings, current level, score)
+- **Configuration and settings** accessed by multiple systems
+- **External library state** (physics engines, audio systems)
+- **Caches and lookup tables** for performance optimization
+- **Asset handle collections** managed globally
+
+```rust
+#[derive(Resource)]
+struct GameSettings {
+    volume: f32,
+    difficulty: Level,
+}
+
+#[derive(Resource)]
+struct AssetHandles {
+    player_texture: Handle<Image>,
+    enemy_textures: Vec<Handle<Image>>,
+}
+```
+
+### Use Components for:
+- **Entity-specific data** that can have multiple instances
+- **Composable behavior** that works with other components
+- **Data processed in groups** through queries
+- **Anything that benefits from ECS patterns** (filtering, iteration, change detection)
+
+```rust
+#[derive(Component)]
+struct Health(f32);
+
+#[derive(Component)]
+struct Velocity(Vec3);
+
+#[derive(Component)]
+struct Player; // Marker component
+```
+
+### The "Player Dilemma"
+Even for singleton entities like "the player", prefer components over resources:
+
+```rust
+// Good: Flexible, composable
+commands.spawn((
+    Player,
+    Transform::default(),
+    Health(100.0),
+    Velocity(Vec3::ZERO),
+));
+
+// Avoid: Less flexible
+#[derive(Resource)]
+struct PlayerData {
+    position: Vec3,
+    health: f32,
+    velocity: Vec3,
+}
+```
+
+## ECS Design Patterns
+
+### Composition Over Inheritance
+Break functionality into small, focused components:
+
+```rust
+// Good: Small, focused components
+#[derive(Component)]
+struct Health(f32);
+
+#[derive(Component)]
+struct Damageable;
+
+#[derive(Component)]
+struct Regenerating { rate: f32 };
+
+// Systems work with any combination
+fn damage_system(mut query: Query<&mut Health, With<Damageable>>) {}
+fn regen_system(mut query: Query<&mut Health, With<Regenerating>>) {}
+```
+
+### Marker Components for Behavior
+Use zero-sized marker components to categorize entities:
+
+```rust
+#[derive(Component)]
+struct Player;
+
+#[derive(Component)]  
+struct Enemy;
+
+#[derive(Component)]
+struct Projectile;
+
+// Query specific entity types
+fn player_input(query: Query<&mut Transform, With<Player>>) {}
+fn enemy_ai(query: Query<&mut Transform, With<Enemy>>) {}
+```
+
+### Bundle Patterns
+Create bundles for common component combinations:
+
+```rust
+#[derive(Bundle)]
+struct ActorBundle {
+    health: Health,
+    transform: Transform,
+    visibility: Visibility,
+}
+
+#[derive(Bundle)]
+struct PlayerBundle {
+    #[bundle]
+    actor: ActorBundle,
+    player: Player,
+    input: InputHandler,
+}
+```
+
+## System Design Best Practices
+
+### Single Responsibility
+Keep systems focused on one specific task:
+
+```rust
+// Good: Focused systems
+fn movement_system(mut query: Query<(&mut Transform, &Velocity)>) {}
+fn collision_system(query: Query<&Transform, With<Collider>>) {}
+fn health_system(mut query: Query<&mut Health>) {}
+
+// Avoid: Monolithic systems doing everything
+fn game_logic_system() {} // Too broad
+```
+
+### Query Optimization
+Use specific queries to minimize data access:
+
+```rust
+// Good: Only access what you need
+fn damage_system(
+    mut health_query: Query<&mut Health>,
+    damage_events: EventReader<DamageEvent>,
+) {}
+
+// Avoid: Accessing unnecessary data
+fn damage_system(
+    mut query: Query<(&mut Health, &Transform, &Velocity)>, // Transform/Velocity not needed
+    damage_events: EventReader<DamageEvent>,
+) {}
+```
+
+### Change Detection Usage
+Use change detection to avoid unnecessary work:
+
+```rust
+// Process only when position changes
+fn update_ui_position(
+    query: Query<&Transform, (With<UIElement>, Changed<Transform>)>,
+    mut ui_query: Query<&mut Style>,
+) {}
+
+// Check resource changes
+fn config_system(settings: Res<GameSettings>) {
+    if settings.is_changed() {
+        // Only run when settings change
+    }
+}
+```
+
+## Query Patterns
+
+### Filter Combinations
+Use query filters effectively:
+
+```rust
+// Entities with Health but without Dead marker
+fn healing_system(mut query: Query<&mut Health, Without<Dead>>) {}
+
+// Entities with Player AND Alive components
+fn player_actions(query: Query<&Transform, (With<Player>, With<Alive>)>) {}
+
+// Recently added components
+fn welcome_new_players(query: Query<Entity, Added<Player>>) {}
+```
+
+### Query Safety
+Handle empty queries gracefully:
+
+```rust
+fn find_player(query: Query<&Transform, With<Player>>) {
+    if let Ok(player_transform) = query.get_single() {
+        // Handle single player
+    }
+    
+    // Or for multiple results
+    for transform in &query {
+        // Process each match
+    }
+}
+```
+
+## Performance Guidelines
+
+### Component Storage
+Choose appropriate storage for access patterns:
+
+```rust
+// Default table storage: Good for frequent iteration
+#[derive(Component)]
+struct Position(Vec3);
+
+// Sparse set storage: Good for infrequent access, fast add/remove
+#[derive(Component)]
+#[component(storage = "SparseSet")]
+struct RarelyUsedComponent;
+```
+
+### System Ordering
+Be explicit about system dependencies:
+
+```rust
+app.add_systems(Update, (
+    input_system,
+    movement_system.after(input_system),
+    collision_system.after(movement_system),
+));
+```
+
+### Batch Operations
+Group related operations for better cache performance:
+
+```rust
+// Good: Process similar entities together
+fn update_positions(mut query: Query<(&mut Transform, &Velocity)>) {
+    for (mut transform, velocity) in &mut query {
+        transform.translation += velocity.0 * time.delta_seconds();
+    }
+}
+```
+
+## Event Patterns
+
+### Event-Driven Architecture
+Use events for decoupled communication:
+
+```rust
+#[derive(Event)]
+struct PlayerDeathEvent {
+    player: Entity,
+    cause: DeathCause,
+}
+
+// Producer
+fn health_system(
+    mut query: Query<(Entity, &Health), With<Player>>,
+    mut death_events: EventWriter<PlayerDeathEvent>,
+) {
+    for (entity, health) in &query {
+        if health.0 <= 0.0 {
+            death_events.send(PlayerDeathEvent {
+                player: entity,
+                cause: DeathCause::Health,
+            });
+        }
+    }
+}
+
+// Consumer
+fn handle_player_death(
+    mut death_events: EventReader<PlayerDeathEvent>,
+    mut commands: Commands,
+) {
+    for event in death_events.read() {
+        // Handle death logic
+        commands.entity(event.player).despawn();
+    }
+}
+```
+
+## Code Organization
+
+### Plugin Structure
+Organize functionality into focused plugins:
+
+```rust
+pub struct PlayerPlugin;
+
+impl Plugin for PlayerPlugin {
+    fn build(&self, app: &mut App) {
+        app
+            .add_systems(Startup, spawn_player)
+            .add_systems(Update, (
+                player_input,
+                player_movement,
+                player_animation,
+            ))
+            .add_event::<PlayerEvent>();
+    }
+}
+```
+
+### State Management
+Use Bevy states for game phases:
+
+```rust
+#[derive(States, Default, Clone, Eq, PartialEq, Hash, Debug)]
+enum GameState {
+    #[default]
+    MainMenu,
+    Playing,
+    Paused,
+    GameOver,
+}
+
+app.add_systems(OnEnter(GameState::Playing), setup_game)
+   .add_systems(Update, game_logic.run_if(in_state(GameState::Playing)))
+   .add_systems(OnExit(GameState::Playing), cleanup_game);
+```
+
+## Common Pitfalls to Avoid
+
+### Don't Store Entity References in Components
+```rust
+// Avoid: Entity references in components
+#[derive(Component)]
+struct BadFollower {
+    target: Entity, // This can become invalid
+}
+
+// Better: Use relationships or queries
+#[derive(Component)]
+struct Follower;
+
+// Find targets through queries or use Bevy's relationship system
+```
+
+### Don't Mutate the Same Component Multiple Times
+```rust
+// Avoid: Multiple systems mutating the same component
+fn system1(mut query: Query<&mut Transform>) {}
+fn system2(mut query: Query<&mut Transform>) {} // Conflict!
+
+// Better: Separate concerns or use explicit ordering
+fn movement_system(mut query: Query<&mut Transform, With<Moving>>) {}
+fn animation_system(mut query: Query<&mut Transform, With<Animated>>) {}
+```
+
+### Don't Overuse Resources
+```rust
+// Avoid: Using resources for entity-specific data
+#[derive(Resource)]
+struct AllPlayerData {
+    players: HashMap<Entity, PlayerStats>, // Use components instead
+}
+
+// Better: Use components
+#[derive(Component)]
+struct PlayerStats {
+    level: u32,
+    experience: u32,
+}
+```
+
+## Testing Patterns
+
+### Test Systems in Isolation
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::prelude::*;
+
+    #[test]
+    fn test_movement_system() {
+        let mut world = World::new();
+        
+        let entity = world.spawn((
+            Transform::default(),
+            Velocity(Vec3::new(1.0, 0.0, 0.0)),
+        )).id();
+        
+        let mut schedule = Schedule::default();
+        schedule.add_systems(movement_system);
+        
+        schedule.run(&mut world);
+        
+        let transform = world.entity(entity).get::<Transform>().unwrap();
+        assert!(transform.translation.x > 0.0);
+    }
+}
+```
+
+Remember: **ECS encourages composition over inheritance, data-driven design, and clear separation of concerns. When in doubt, prefer components for flexibility and use resources sparingly for truly global state.**# Bevy Development Guidelines
+
+## Resources vs Components Decision Framework
+
+### Use Resources for:
+- **Global singleton data** (game settings, current level, score)
+- **Configuration and settings** accessed by multiple systems
+- **External library state** (physics engines, audio systems)
+- **Caches and lookup tables** for performance optimization
+- **Asset handle collections** managed globally
+
+```rust
+#[derive(Resource)]
+struct GameSettings {
+    volume: f32,
+    difficulty: Level,
+}
+
+#[derive(Resource)]
+struct AssetHandles {
+    player_texture: Handle<Image>,
+    enemy_textures: Vec<Handle<Image>>,
+}
+```
+
+### Use Components for:
+- **Entity-specific data** that can have multiple instances
+- **Composable behavior** that works with other components
+- **Data processed in groups** through queries
+- **Anything that benefits from ECS patterns** (filtering, iteration, change detection)
+
+```rust
+#[derive(Component)]
+struct Health(f32);
+
+#[derive(Component)]
+struct Velocity(Vec3);
+
+#[derive(Component)]
+struct Player; // Marker component
+```
+
+### The "Player Dilemma"
+Even for singleton entities like "the player", prefer components over resources:
+
+```rust
+// Good: Flexible, composable
+commands.spawn((
+    Player,
+    Transform::default(),
+    Health(100.0),
+    Velocity(Vec3::ZERO),
+));
+
+// Avoid: Less flexible
+#[derive(Resource)]
+struct PlayerData {
+    position: Vec3,
+    health: f32,
+    velocity: Vec3,
+}
+```
+
+## ECS Design Patterns
+
+### Composition Over Inheritance
+Break functionality into small, focused components:
+
+```rust
+// Good: Small, focused components
+#[derive(Component)]
+struct Health(f32);
+
+#[derive(Component)]
+struct Damageable;
+
+#[derive(Component)]
+struct Regenerating { rate: f32 };
+
+// Systems work with any combination
+fn damage_system(mut query: Query<&mut Health, With<Damageable>>) {}
+fn regen_system(mut query: Query<&mut Health, With<Regenerating>>) {}
+```
+
+### Marker Components for Behavior
+Use zero-sized marker components to categorize entities:
+
+```rust
+#[derive(Component)]
+struct Player;
+
+#[derive(Component)]  
+struct Enemy;
+
+#[derive(Component)]
+struct Projectile;
+
+// Query specific entity types
+fn player_input(query: Query<&mut Transform, With<Player>>) {}
+fn enemy_ai(query: Query<&mut Transform, With<Enemy>>) {}
+```
+
+### Bundle Patterns
+Create bundles for common component combinations:
+
+```rust
+#[derive(Bundle)]
+struct ActorBundle {
+    health: Health,
+    transform: Transform,
+    visibility: Visibility,
+}
+
+#[derive(Bundle)]
+struct PlayerBundle {
+    #[bundle]
+    actor: ActorBundle,
+    player: Player,
+    input: InputHandler,
+}
+```
+
+## System Design Best Practices
+
+### Single Responsibility
+Keep systems focused on one specific task:
+
+```rust
+// Good: Focused systems
+fn movement_system(mut query: Query<(&mut Transform, &Velocity)>) {}
+fn collision_system(query: Query<&Transform, With<Collider>>) {}
+fn health_system(mut query: Query<&mut Health>) {}
+
+// Avoid: Monolithic systems doing everything
+fn game_logic_system() {} // Too broad
+```
+
+### Query Optimization
+Use specific queries to minimize data access:
+
+```rust
+// Good: Only access what you need
+fn damage_system(
+    mut health_query: Query<&mut Health>,
+    damage_events: EventReader<DamageEvent>,
+) {}
+
+// Avoid: Accessing unnecessary data
+fn damage_system(
+    mut query: Query<(&mut Health, &Transform, &Velocity)>, // Transform/Velocity not needed
+    damage_events: EventReader<DamageEvent>,
+) {}
+```
+
+### Change Detection Usage
+Use change detection to avoid unnecessary work:
+
+```rust
+// Process only when position changes
+fn update_ui_position(
+    query: Query<&Transform, (With<UIElement>, Changed<Transform>)>,
+    mut ui_query: Query<&mut Style>,
+) {}
+
+// Check resource changes
+fn config_system(settings: Res<GameSettings>) {
+    if settings.is_changed() {
+        // Only run when settings change
+    }
+}
+```
+
+## Query Patterns
+
+### Filter Combinations
+Use query filters effectively:
+
+```rust
+// Entities with Health but without Dead marker
+fn healing_system(mut query: Query<&mut Health, Without<Dead>>) {}
+
+// Entities with Player AND Alive components
+fn player_actions(query: Query<&Transform, (With<Player>, With<Alive>)>) {}
+
+// Recently added components
+fn welcome_new_players(query: Query<Entity, Added<Player>>) {}
+```
+
+### Query Safety
+Handle empty queries gracefully:
+
+```rust
+fn find_player(query: Query<&Transform, With<Player>>) {
+    if let Ok(player_transform) = query.get_single() {
+        // Handle single player
+    }
+    
+    // Or for multiple results
+    for transform in &query {
+        // Process each match
+    }
+}
+```
+
+## Performance Guidelines
+
+### Component Storage
+Choose appropriate storage for access patterns:
+
+```rust
+// Default table storage: Good for frequent iteration
+#[derive(Component)]
+struct Position(Vec3);
+
+// Sparse set storage: Good for infrequent access, fast add/remove
+#[derive(Component)]
+#[component(storage = "SparseSet")]
+struct RarelyUsedComponent;
+```
+
+### System Ordering
+Be explicit about system dependencies:
+
+```rust
+app.add_systems(Update, (
+    input_system,
+    movement_system.after(input_system),
+    collision_system.after(movement_system),
+));
+```
+
+### Batch Operations
+Group related operations for better cache performance:
+
+```rust
+// Good: Process similar entities together
+fn update_positions(mut query: Query<(&mut Transform, &Velocity)>) {
+    for (mut transform, velocity) in &mut query {
+        transform.translation += velocity.0 * time.delta_seconds();
+    }
+}
+```
+
+## Event Patterns
+
+### Event-Driven Architecture
+Use events for decoupled communication:
+
+```rust
+#[derive(Event)]
+struct PlayerDeathEvent {
+    player: Entity,
+    cause: DeathCause,
+}
+
+// Producer
+fn health_system(
+    mut query: Query<(Entity, &Health), With<Player>>,
+    mut death_events: EventWriter<PlayerDeathEvent>,
+) {
+    for (entity, health) in &query {
+        if health.0 <= 0.0 {
+            death_events.send(PlayerDeathEvent {
+                player: entity,
+                cause: DeathCause::Health,
+            });
+        }
+    }
+}
+
+// Consumer
+fn handle_player_death(
+    mut death_events: EventReader<PlayerDeathEvent>,
+    mut commands: Commands,
+) {
+    for event in death_events.read() {
+        // Handle death logic
+        commands.entity(event.player).despawn();
+    }
+}
+```
+
+## Code Organization
+
+### Plugin Structure
+Organize functionality into focused plugins:
+
+```rust
+pub struct PlayerPlugin;
+
+impl Plugin for PlayerPlugin {
+    fn build(&self, app: &mut App) {
+        app
+            .add_systems(Startup, spawn_player)
+            .add_systems(Update, (
+                player_input,
+                player_movement,
+                player_animation,
+            ))
+            .add_event::<PlayerEvent>();
+    }
+}
+```
+
+### State Management
+Use Bevy states for game phases:
+
+```rust
+#[derive(States, Default, Clone, Eq, PartialEq, Hash, Debug)]
+enum GameState {
+    #[default]
+    MainMenu,
+    Playing,
+    Paused,
+    GameOver,
+}
+
+app.add_systems(OnEnter(GameState::Playing), setup_game)
+   .add_systems(Update, game_logic.run_if(in_state(GameState::Playing)))
+   .add_systems(OnExit(GameState::Playing), cleanup_game);
+```
+
+## Common Pitfalls to Avoid
+
+### Don't Store Entity References in Components
+```rust
+// Avoid: Entity references in components
+#[derive(Component)]
+struct BadFollower {
+    target: Entity, // This can become invalid
+}
+
+// Better: Use relationships or queries
+#[derive(Component)]
+struct Follower;
+
+// Find targets through queries or use Bevy's relationship system
+```
+
+### Don't Mutate the Same Component Multiple Times
+```rust
+// Avoid: Multiple systems mutating the same component
+fn system1(mut query: Query<&mut Transform>) {}
+fn system2(mut query: Query<&mut Transform>) {} // Conflict!
+
+// Better: Separate concerns or use explicit ordering
+fn movement_system(mut query: Query<&mut Transform, With<Moving>>) {}
+fn animation_system(mut query: Query<&mut Transform, With<Animated>>) {}
+```
+
+### Don't Overuse Resources
+```rust
+// Avoid: Using resources for entity-specific data
+#[derive(Resource)]
+struct AllPlayerData {
+    players: HashMap<Entity, PlayerStats>, // Use components instead
+}
+
+// Better: Use components
+#[derive(Component)]
+struct PlayerStats {
+    level: u32,
+    experience: u32,
+}
+```
+
+## Testing Patterns
+
+### Test Systems in Isolation
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::prelude::*;
+
+    #[test]
+    fn test_movement_system() {
+        let mut world = World::new();
+        
+        let entity = world.spawn((
+            Transform::default(),
+            Velocity(Vec3::new(1.0, 0.0, 0.0)),
+        )).id();
+        
+        let mut schedule = Schedule::default();
+        schedule.add_systems(movement_system);
+        
+        schedule.run(&mut world);
+        
+        let transform = world.entity(entity).get::<Transform>().unwrap();
+        assert!(transform.translation.x > 0.0);
+    }
+}
+```
+
+Remember: **ECS encourages composition over inheritance, data-driven design, and clear separation of concerns. When in doubt, prefer components for flexibility and use resources sparingly for truly global state.**

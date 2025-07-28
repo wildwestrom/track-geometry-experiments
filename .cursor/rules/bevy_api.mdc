@@ -1,5 +1,5 @@
 ---
-description: Any time bevy is being used
+description: Any time Bevy is being used
 alwaysApply: false
 ---
 # Bevy API Rule
@@ -15,7 +15,7 @@ alwaysApply: false
 - When unsure about API usage, search the documentation first
 
 ## Common Issues to Avoid:
-- Using outdated component names (e.g., `NodeBundle` vs `Node`, `Query::get_single_mut()`, `Query::single_mut()`, `despawn_recursive()` vs `despawn()`)
+- Using outdated component names (e.g., `NodeBundle` vs `Node`, `Query::get_single_mut()` vs `Query::single_mut()`, `despawn_recursive()` vs `despawn()`)
 - Trying to import things that are not available (e.g. `Parent`)
 - Incorrect system parameter types
 - Wrong import paths (or importing things that are already in `bevy::prelude::*`)
