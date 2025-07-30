@@ -412,7 +412,7 @@ fn create_perspective_angled_state(size: f32) -> (Transform, PerspectiveProjecti
     let fov = 60.0_f32.to_radians();
     // Desired camera position at 60deg FOV, looking from a diagonal angle
     let distance = dolly_zoom_distance(size, fov);
-    let initial_angle = Vec3::ONE;
+    let initial_angle = Vec3::new(0., 1., 1.);
     let angled_pos = initial_angle.normalize() * distance;
     let transform = Transform::from_translation(angled_pos).looking_at(Vec3::ZERO, Vec3::Y);
     let projection = create_perspective_projection(fov);

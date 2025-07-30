@@ -9,7 +9,6 @@ use bevy::{
 use bevy_egui::EguiPlugin;
 
 mod alignment;
-mod alignment_math;
 mod camera;
 //mod hud;
 mod pin;

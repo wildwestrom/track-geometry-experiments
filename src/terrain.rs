@@ -151,8 +151,8 @@ impl TerrainGenerator {
         let mut min_height = f32::INFINITY;
         let mut max_height = f32::NEG_INFINITY;
 
-        for z in 0..=self.grid_z {
-            for x in 0..=self.grid_x {
+        for x in 0..=self.grid_x {
+            for z in 0..=self.grid_z {
                 // Use spatial utilities for world coordinate conversion
                 let world_pos = grid_to_world(x, z, settings);
                 let height = self.calculate_height_at_position(
@@ -167,12 +167,12 @@ impl TerrainGenerator {
                 max_height = max_height.max(height);
             }
         }
-
         // Normalize all values to 0-1 range
         let height_range = max_height - min_height;
+
         if height_range > 0.0 {
-            for z in 0..=self.grid_z {
-                for x in 0..=self.grid_x {
+            for x in 0..=self.grid_x {
+                for z in 0..=self.grid_z {
                     let height = self.height_map.get(x, z);
                     let normalized_height = (height - min_height) / height_range;
 
@@ -188,8 +188,6 @@ impl TerrainGenerator {
                 height_range, min_height, max_height
             );
         }
-
-        settings.valley_exponent;
     }
 
     fn calculate_height_at_position(
@@ -257,7 +255,6 @@ impl TerrainGenerator {
         let mut texture_data =
             Vec::with_capacity(((self.grid_x + 1) * (self.grid_z + 1) * 4) as usize);
 
-        // Fill the texture data in the same order as the mesh vertices (z-major, then x)
         for z in 0..=self.grid_z {
             for x in 0..=self.grid_x {
                 let height = self.height_map.get(x, z);

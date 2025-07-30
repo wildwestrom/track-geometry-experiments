@@ -1,9 +1,13 @@
+use std::f64::consts::PI;
+
 use bevy::gizmos::config::{GizmoConfigGroup, GizmoConfigStore};
+use bevy::math::ops::atan2;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy::render::view::RenderLayers;
 use bevy_egui::{EguiContexts, egui};
 use serde::{Deserialize, Serialize};
+use spec_math::Fresnel;
 
 use crate::pin::create_pin;
 use crate::saveable::SaveableSettings;
@@ -444,7 +448,7 @@ impl Alignment {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone, Copy)]
 pub struct PathSegment {
     pub tangent_vertex: Vec3,
     pub circular_section_radius: f32,
@@ -529,7 +533,8 @@ fn render_alignment_path(
     alignment_state: Res<AlignmentState>,
     alignment_pins: Query<(&Transform, &AlignmentPoint)>,
 ) {
-    // Find start and end points for the current alignment
+    gizmos.axes(Transform::IDENTITY, 100.0);
+
     let mut start = None;
     let mut end = None;
 
@@ -551,40 +556,286 @@ fn render_alignment_path(
         return;
     }
 
-    // Draw linear alignment (0 turns)
-    if alignment_state.turns == 0 {
-        gizmos.line(start, end, Color::srgb(0.5, 0.8, 1.0));
-        return;
-    }
-
-    // Draw multi-turn alignment (1+ turns)
     if let Some(alignment) = alignment_state.alignments.get(&alignment_state.turns) {
-        let segments = &alignment.segments;
+        let segments = {
+            let mut full_alignment = Vec::new();
+            full_alignment.push(PathSegment::new(start));
+            let mut incomplete_alignment = alignment.segments.clone();
+            full_alignment.append(&mut incomplete_alignment);
+            full_alignment.push(PathSegment::new(end));
+            full_alignment
+        };
 
-        if segments.is_empty() {
-            return;
-        }
-
-        // Draw line from start to first tangent vertex
-        let first_vertex = segments[0].tangent_vertex;
-        if first_vertex.is_finite() {
-            gizmos.line(start, first_vertex, Color::srgb(0.5, 0.8, 1.0));
-        }
+        segments
+            .iter()
+            .for_each(|s| assert!(s.tangent_vertex.is_finite()));
+        assert!(!segments.is_empty());
 
         // Draw lines between consecutive tangent vertices
         for i in 0..segments.len() - 1 {
-            let current_vertex = segments[i].tangent_vertex;
-            let next_vertex = segments[i + 1].tangent_vertex;
+            let current_segment = segments[i];
+            let next_segment = segments[i + 1];
+            let v_i = current_segment.tangent_vertex;
+            let v_i_plus_1 = next_segment.tangent_vertex;
+            let r_i = current_segment.circular_section_radius;
+            let omega_i = current_segment.circular_section_angle;
+            let clothoid_curve_iterations = 32;
+            let u_i_plus_1 = (&v_i_plus_1 - &v_i).normalize();
 
-            if current_vertex.is_finite() && next_vertex.is_finite() {
-                gizmos.line(current_vertex, next_vertex, Color::srgb(0.5, 0.8, 1.0));
+            if i > 0 {
+                let previous_segment = segments[i - 1];
+                let v_i_minus_1 = previous_segment.tangent_vertex;
+                let phi_i = {
+                    let delta_x = v_i.x - v_i_minus_1.x;
+                    let delta_z = v_i.z - v_i_minus_1.z;
+                    let angle = atan2(delta_z, delta_x);
+                    -angle // we negate to switch from counterclockwise to clockwise
+                };
+                let phi_i_plus_1 = {
+                    let delta_x = &v_i_plus_1.x - v_i.x;
+                    let delta_z = &v_i_plus_1.z - v_i.z;
+                    let angle = atan2(delta_z, delta_x);
+                    -angle // we negate to switch from counterclockwise to clockwise
+                };
+                let mut theta_i = phi_i_plus_1 - phi_i;
+                // Ensure theta_i is positive and handle angle wrapping
+                if theta_i < 0.0 {
+                    theta_i += 2.0 * PI as f32;
+                }
+                if theta_i > PI as f32 {
+                    theta_i = 2.0 * PI as f32 - theta_i;
+                }
+                let l_c = r_i * (theta_i - omega_i);
+
+                let u_i = (&v_i - &v_i_minus_1).normalize();
+
+                gizmos.arc_3d(
+                    phi_i,
+                    150.0, // radius
+                    Isometry3d::new(
+                        segments[i].tangent_vertex,
+                        Quat::from_axis_angle(Vec3::Y, 0.),
+                    ),
+                    Color::srgb(0.9, 1.0, 0.2), // yellow
+                );
+                // azimuth reference line
+                gizmos.line(
+                    v_i,
+                    v_i + Vec3::ZERO.with_x(175.0),
+                    Color::srgb(1.0, 0.8, 0.4), // orange
+                );
+
+                // difference in azimuths
+                gizmos.arc_3d(
+                    theta_i,
+                    200.0, // radius
+                    Isometry3d::new(
+                        segments[i].tangent_vertex,
+                        Quat::from_axis_angle(Vec3::Y, phi_i),
+                    ),
+                    Color::srgb(0.6, 0.0, 1.0), // purple
+                );
+
+                // ------ BEGIN IN-JUNCTION CALCULATION ------
+                let theta_i_abs = theta_i.abs() as f64;
+                let omega_i_abs = omega_i.abs() as f64;
+                let r_i_abs = r_i.abs() as f64;
+                let l_c_abs = l_c.abs() as f64;
+                let clothoid_angle = theta_i_abs - omega_i_abs;
+
+                let fresnel_arg = (l_c_abs / (PI * r_i_abs)).sqrt();
+                let fresnel_scale = (PI * r_i_abs * l_c_abs).sqrt();
+
+                let fresnel = fresnel_arg.fresnel();
+                let pf_i = fresnel_scale * fresnel.s;
+                let tp_i = fresnel_scale * fresnel.c;
+
+                let cos_half_clothoid_angle = (clothoid_angle / 2.0).cos();
+                let sin_half_omega = (omega_i_abs / 2.0).sin();
+                let sin_half_interior_angle = ((PI - theta_i_abs) / 2.0).sin();
+
+                let ph_i = pf_i * (clothoid_angle / 2.0).tan();
+                let hv_i = (r_i_abs + pf_i / cos_half_clothoid_angle)
+                    * (sin_half_omega / sin_half_interior_angle);
+
+                let total_tangent_length = tp_i + ph_i + hv_i;
+
+                let t_i = v_i - (total_tangent_length as f32) * u_i;
+
+                gizmos.sphere(
+                    Isometry3d::from_translation(t_i),
+                    10.0,
+                    Color::srgb(1.0, 1.0, 0.0),
+                );
+                // ------ END IN-JUNCTION CALCULATION ------
+
+                // ------ BEGIN IN-CLOTHOID CALCULATION ------
+                // Calculate clothoid parameters
+                let r_i_abs = r_i.abs() as f64;
+                let l_c_abs = l_c.abs() as f64;
+
+                // Cross product Y component for x-z plane to determine orientation
+                let cross_y = u_i.x * u_i_plus_1.z - u_i.z * u_i_plus_1.x;
+                let lambda_i = if cross_y >= 0.0 { 1.0_f64 } else { -1.0_f64 };
+
+                let beta_i = u_i.z.atan2(u_i.x) as f64;
+
+                let inner = (PI * r_i_abs * l_c_abs) / lambda_i;
+                let fresnel_scale = inner.abs().sqrt();
+                let fresnel_scale_sign = inner.signum();
+                #[allow(non_snake_case)]
+                let ingoing_clothoid = FunctionCurve::new(Interval::UNIT, |s| {
+                    let tilde_s = s as f64 * l_c_abs;
+
+                    let fresnel_arg = tilde_s / fresnel_scale;
+
+                    let fresnel = fresnel_arg.fresnel();
+
+                    let I_x = (fresnel_scale
+                        * ((beta_i * fresnel_scale_sign).cos() * fresnel.c
+                            - (beta_i * fresnel_scale_sign).sin() * fresnel.s))
+                        as f32;
+                    let I_z = (fresnel_scale_sign
+                        * fresnel_scale
+                        * ((beta_i * fresnel_scale_sign).sin() * fresnel.c
+                            + (beta_i * fresnel_scale_sign).cos() * fresnel.s))
+                        as f32;
+
+                    t_i + Vec3::new(I_x, 0.0, I_z)
+                });
+
+                gizmos.curve_3d(
+                    ingoing_clothoid,
+                    (0..=clothoid_curve_iterations)
+                        .map(|i| i as f32 / clothoid_curve_iterations as f32),
+                    Color::srgb(0.5, 1.0, 0.0),
+                );
+                // ------ END IN-CLOTHOID CALCULATION ------
+
+                // ------ BEGIN CIRCULAR ARC CALCULATION ------
+                let h_i = v_i - (hv_i as f32) * u_i;
+
+                #[allow(non_snake_case)]
+                let f_i = {
+                    let fresnel_arg = l_c_abs / fresnel_scale;
+                    let fresnel = fresnel_arg.fresnel();
+
+                    let I_x = (fresnel_scale
+                        * ((beta_i * fresnel_scale_sign).cos() * fresnel.c
+                            - (beta_i * fresnel_scale_sign).sin() * fresnel.s))
+                        as f32;
+                    let I_z = (fresnel_scale_sign
+                        * fresnel_scale
+                        * ((beta_i * fresnel_scale_sign).sin() * fresnel.c
+                            + (beta_i * fresnel_scale_sign).cos() * fresnel.s))
+                        as f32;
+
+                    t_i + Vec3::new(I_x, 0.0, I_z)
+                };
+                // At the end of the ingoing clothoid, the tangent has rotated by half the total
+                // turn angle
+                let clothoid_angle_change = lambda_i * (theta_i as f64 - omega_i as f64) / 2.0;
+                let clothoid_end_tangent_angle = beta_i + clothoid_angle_change;
+
+                // w_i should be perpendicular to the tangent at f_i, pointing toward the arc center
+                // For a left turn (lambda_i > 0), center is to the left of the tangent direction
+                // For a right turn (lambda_i < 0), center is to the right of the tangent direction
+                let w_i = if lambda_i > 0.0 {
+                    // Left turn: rotate tangent direction 90° counter-clockwise
+                    Vec3::new(
+                        -(clothoid_end_tangent_angle.sin() as f32),
+                        0.0,
+                        clothoid_end_tangent_angle.cos() as f32,
+                    )
+                } else {
+                    // Right turn: rotate tangent direction 90° clockwise
+                    Vec3::new(
+                        clothoid_end_tangent_angle.sin() as f32,
+                        0.0,
+                        -(clothoid_end_tangent_angle.cos() as f32),
+                    )
+                };
+
+                let o_i = f_i + (r_i as f32) * w_i;
+                // Calculate the vector from arc center to starting point
+                let start_vector = f_i - o_i;
+                // Bevy's arc_3d starts from positive X direction, so we need the angle from +X to
+                // our start vector
+                let alpha_i = start_vector.z.atan2(start_vector.x);
+
+                // gizmos.circle(
+                //     Isometry3d::new(o_i, Quat::from_axis_angle(Vec3::X, 90_f32.to_radians())),
+                //     r_i,
+                //     Color::srgba(1.0, 0.7, 0.9, 0.3), // hot pink
+                // );
+                // Arc direction should match turn direction
+                let arc_sweep = -lambda_i.signum() as f32 * omega_i;
+                gizmos.arc_3d(
+                    arc_sweep,
+                    r_i,
+                    Isometry3d::new(o_i, Quat::from_axis_angle(Vec3::Y, -alpha_i)),
+                    Color::srgb(1.0, 0.0, 0.0), // red
+                );
+
+                // Draw a line from center to where the arc should start
+                gizmos.line(o_i, f_i, Color::srgb(1.0, 0.5, 0.0)); // orange line
+
+                // Mark the clothoid endpoint
+                gizmos.sphere(
+                    Isometry3d::from_translation(f_i),
+                    8.0,
+                    Color::srgb(0.0, 1.0, 1.0), // cyan
+                );
+                // ------ END CIRCULAR ARC CALCULATION ------
+
+                // ------ BEGIN OUT-JUNCTION CALCULATION ------
+                let c_i = v_i + (total_tangent_length as f32) * u_i_plus_1;
+
+                gizmos.sphere(
+                    Isometry3d::from_translation(c_i),
+                    10.0,
+                    Color::srgb(1.0, 1.0, 0.0),
+                );
+                // ------ END OUT-JUNCTION CALCULATION ------
+
+                // ------ BEGIN OUT-CLOTHOID CALCULATION ------
+                // For outgoing clothoid, beta should be angle between u_{i+1} and OX+
+                let beta_i = u_i_plus_1.z.atan2(u_i_plus_1.x) as f64;
+                dbg!(beta_i);
+                #[allow(non_snake_case)]
+                let outgoing_clothoid = FunctionCurve::new(Interval::UNIT, |s| {
+                    let tilde_s = -s as f64 * l_c_abs;
+
+                    let fresnel_arg = tilde_s / fresnel_scale;
+
+                    let fresnel = fresnel_arg.fresnel();
+
+                    let I_x = (fresnel_scale
+                        * ((beta_i * fresnel_scale_sign).cos() * fresnel.c
+                            + (beta_i * fresnel_scale_sign).sin() * fresnel.s))
+                        as f32;
+                    let I_z = (fresnel_scale_sign
+                        * fresnel_scale
+                        * ((beta_i * fresnel_scale_sign).sin() * fresnel.c
+                            - (beta_i * fresnel_scale_sign).cos() * fresnel.s))
+                        as f32;
+
+                    c_i + Vec3::new(I_x, 0.0, I_z)
+                });
+
+                gizmos.curve_3d(
+                    outgoing_clothoid,
+                    (0..=clothoid_curve_iterations)
+                        .map(|i| i as f32 / clothoid_curve_iterations as f32),
+                    Color::srgb(0.5, 1.0, 0.0),
+                );
+                // ------ END OUT-CLOTHOID CALCULATION ------
             }
-        }
 
-        // Draw line from last tangent vertex to end
-        let last_vertex = segments[segments.len() - 1].tangent_vertex;
-        if last_vertex.is_finite() {
-            gizmos.line(last_vertex, end, Color::srgb(0.5, 0.8, 1.0));
+            let len = 300.0;
+            let end_1 = v_i - u_i_plus_1 * len;
+            let end_2 = v_i_plus_1 + u_i_plus_1 * len;
+            gizmos.line(end_1, end_2, Color::srgb(0.5, 0.8, 1.0));
         }
     }
 }
