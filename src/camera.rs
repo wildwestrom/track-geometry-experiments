@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::render::view::RenderLayers;
-use bevy_panorbit_camera::*;
-use bevy_tweening::*;
+use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
+use bevy_tweening::{Animator, Lens, Targetable, Tween, TweeningPlugin};
 use std::f32::consts::PI;
 
 use crate::spatial::world_size;
@@ -78,22 +78,22 @@ pub struct CameraMode {
 
 impl CameraMode {
 	/// Disable camera movement (typically during drag operations)
-	pub fn disable_camera_movement(&mut self) {
+	pub const fn disable_camera_movement(&mut self) {
 		self.user_enabled = false;
 	}
 
 	/// Enable camera movement
-	pub fn enable_camera_movement(&mut self) {
+	pub const fn enable_camera_movement(&mut self) {
 		self.user_enabled = true;
 	}
 
 	/// Check if camera is in transition
-	pub fn is_camera_transitioning(&self) -> bool {
+	pub const fn is_camera_transitioning(&self) -> bool {
 		self.is_transitioning
 	}
 
 	/// Check if camera movement is enabled
-	pub fn is_camera_movement_enabled(&self) -> bool {
+	pub const fn is_camera_movement_enabled(&self) -> bool {
 		self.user_enabled
 	}
 }
@@ -109,23 +109,18 @@ impl Default for CameraMode {
 	}
 }
 
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(PartialEq, Debug, Clone, Copy, Default)]
 enum CameraState {
+	#[default]
 	Perspective,
 	Orthographic,
 }
 
-impl Default for CameraState {
-	fn default() -> Self {
-		CameraState::Perspective
-	}
-}
-
 impl CameraState {
-	fn next(self) -> Self {
+	const fn next(self) -> Self {
 		match self {
-			CameraState::Perspective => CameraState::Orthographic,
-			CameraState::Orthographic => CameraState::Perspective,
+			Self::Perspective => Self::Orthographic,
+			Self::Orthographic => Self::Perspective,
 		}
 	}
 }
@@ -144,8 +139,8 @@ const PADDING: f32 = 500.0;
 
 impl Lens<Transform> for DollyZoomLens {
 	fn lerp(&mut self, target: &mut dyn Targetable<Transform>, ratio: f32) {
-		let fov = self.start_fov + (self.end_fov - self.start_fov) * ratio;
-		let size = self.start_size + (self.end_size - self.start_size) * ratio;
+		let fov = (self.end_fov - self.start_fov).mul_add(ratio, self.start_fov);
+		let size = (self.end_size - self.start_size).mul_add(ratio, self.start_size);
 		let distance = dolly_zoom_distance(size, fov);
 		// let distance = self.start_distance + (self.end_distance - self.start_distance) * ratio;
 		let rot = self.start_rot.slerp(self.end_rot, ratio);
@@ -172,8 +167,8 @@ struct PanOrbitCameraLens {
 
 impl Lens<PanOrbitCamera> for PanOrbitCameraLens {
 	fn lerp(&mut self, target: &mut dyn Targetable<PanOrbitCamera>, ratio: f32) {
-		let fov = self.start_fov + (self.end_fov - self.start_fov) * ratio;
-		let size = self.start_size + (self.end_size - self.start_size) * ratio;
+		let fov = (self.end_fov - self.start_fov).mul_add(ratio, self.start_fov);
+		let size = (self.end_size - self.start_size).mul_add(ratio, self.start_size);
 		let distance = dolly_zoom_distance(size, fov);
 
 		// Calculate start and end spherical coordinates directly from rotations
@@ -184,8 +179,8 @@ impl Lens<PanOrbitCamera> for PanOrbitCameraLens {
 		let (end_yaw, end_pitch) = direction_to_spherical(end_direction);
 
 		// Interpolate spherical coordinates directly
-		let yaw = start_yaw + (end_yaw - start_yaw) * ratio;
-		let pitch = start_pitch + (end_pitch - start_pitch) * ratio;
+		let yaw = (end_yaw - start_yaw).mul_add(ratio, start_yaw);
+		let pitch = (end_pitch - start_pitch).mul_add(ratio, start_pitch);
 		let radius = distance;
 
 		if let Some(pan_orbit_camera) = target.as_any_mut().downcast_mut::<PanOrbitCamera>() {
@@ -216,10 +211,10 @@ struct ProjectionFovLens {
 
 impl Lens<Projection> for ProjectionFovLens {
 	fn lerp(&mut self, target: &mut dyn Targetable<Projection>, ratio: f32) {
-		if let Some(projection) = target.as_any_mut().downcast_mut::<Projection>() {
-			if let Projection::Perspective(persp) = projection {
-				persp.fov = self.start + (self.end - self.start) * ratio;
-			}
+		if let Some(projection) = target.as_any_mut().downcast_mut::<Projection>()
+			&& let Projection::Perspective(persp) = projection
+		{
+			persp.fov = (self.end - self.start).mul_add(ratio, self.start);
 		}
 	}
 }
@@ -242,128 +237,129 @@ fn toggle_camera(
 	camera_query: Query<(Entity, &Transform, &Projection, &PanOrbitCamera)>,
 	settings: Res<crate::terrain::Settings>,
 ) {
-	if keyboard_input.just_pressed(KeyCode::KeyT) && !camera_mode.is_transitioning {
-		if let Ok((camera_entity, current_transform, current_projection, _)) = camera_query.single() {
-			let new_mode = camera_mode.current_mode.next();
-			camera_mode.is_transitioning = true;
+	if keyboard_input.just_pressed(KeyCode::KeyT)
+		&& !camera_mode.is_transitioning
+		&& let Ok((camera_entity, current_transform, current_projection, _)) = camera_query.single()
+	{
+		let new_mode = camera_mode.current_mode.next();
+		camera_mode.is_transitioning = true;
 
-			camera_mode.transition_timer = Timer::from_seconds(TOTAL_TRANSITION_TIME, TimerMode::Once);
+		camera_mode.transition_timer = Timer::from_seconds(TOTAL_TRANSITION_TIME, TimerMode::Once);
 
-			let world_size = world_size(&settings);
+		let world_size = world_size(&settings);
 
-			match (camera_mode.current_mode, new_mode) {
-				// Perspective → Orthographic: 1-stage transition
-				(CameraState::Perspective, CameraState::Orthographic) => {
-					let end_size = world_size + PADDING; // TODO: Use settings.terrain.world_length().max(settings.terrain.world_width()) instead of hardcoded value
-					let end_fov = CLOSE_TO_ORTHOGRAPHIC_FOV;
-					let start_fov = if let Projection::Perspective(p) = current_projection {
-						p.fov
-					} else {
-						panic!("Expected perspective projection");
-					};
-					let start_rot = current_transform.rotation;
-					let end_rot = Quat::from_axis_angle(Vec3::Y, 90.0_f32.to_radians())
-						* Quat::from_axis_angle(Vec3::X, -89.9_f32.to_radians());
-					// Calculate current camera's effective size from its position and FOV
-					let current_distance = current_transform.translation.length();
-					let current_size = dolly_zoom_width(current_distance, start_fov);
-					let transform_tween = Tween::new(
-						EaseFunction::SmoothStep,
-						std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
-						DollyZoomLens {
-							start_fov,
-							end_fov,
-							start_rot,
-							end_rot,
-							start_size: current_size,
-							end_size,
-						},
-					);
-					let fov_tween = Tween::new(
-						EaseFunction::SmoothStep,
-						std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
-						ProjectionFovLens {
-							start: start_fov,
-							end: end_fov,
-						},
-					);
-					let pan_orbit_tween = Tween::new(
-						EaseFunction::SmoothStep,
-						std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
-						PanOrbitCameraLens {
-							start_fov,
-							end_fov,
-							start_rot,
-							end_rot,
-							start_size: current_size,
-							end_size,
-						},
-					);
-					commands
-						.entity(camera_entity)
-						.insert(Animator::new(transform_tween))
-						.insert(Animator::new(fov_tween))
-						.insert(Animator::new(pan_orbit_tween));
-				}
-				// Orthographic → Perspective: 1-stage transition
-				(CameraState::Orthographic, CameraState::Perspective) => {
-					let end_size = world_size + PADDING; // TODO: Use settings.terrain.world_length().max(settings.terrain.world_width()) instead of hardcoded value
-					let (angled_transform, angled_projection) = create_perspective_angled_state(end_size);
-					let start_fov = if let Projection::Perspective(p) = current_projection {
-						p.fov
-					} else {
-						panic!("Expected perspective projection");
-					};
-					let end_fov = angled_projection.fov;
-					let start_rot = current_transform.rotation;
-					let end_transform = angled_transform;
-					let end_rot = end_transform.rotation;
-					// Calculate current camera's effective size from its position and FOV
-					let current_distance = current_transform.translation.length();
-					let current_size = dolly_zoom_width(current_distance, start_fov);
-					let transform_tween = Tween::new(
-						EaseFunction::SmoothStep,
-						std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
-						DollyZoomLens {
-							start_fov,
-							end_fov,
-							start_rot,
-							end_rot,
-							start_size: current_size,
-							end_size,
-						},
-					);
-					let fov_tween = Tween::new(
-						EaseFunction::SmoothStep,
-						std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
-						ProjectionFovLens {
-							start: start_fov,
-							end: end_fov,
-						},
-					);
-					let pan_orbit_tween = Tween::new(
-						EaseFunction::SmoothStep,
-						std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
-						PanOrbitCameraLens {
-							start_fov,
-							end_fov,
-							start_rot,
-							end_rot,
-							start_size: current_size,
-							end_size,
-						},
-					);
-					commands
-						.entity(camera_entity)
-						.insert(Animator::new(transform_tween))
-						.insert(Animator::new(fov_tween))
-						.insert(Animator::new(pan_orbit_tween));
-				}
-				_ => unreachable!(),
+		match (camera_mode.current_mode, new_mode) {
+			// Perspective → Orthographic: 1-stage transition
+			(CameraState::Perspective, CameraState::Orthographic) => {
+				let end_size = world_size + PADDING; // TODO: Use settings.terrain.world_length().max(settings.terrain.world_width()) instead of hardcoded value
+				let end_fov = CLOSE_TO_ORTHOGRAPHIC_FOV;
+				let start_fov = if let Projection::Perspective(p) = current_projection {
+					p.fov
+				} else {
+					panic!("Expected perspective projection");
+				};
+				let start_rot = current_transform.rotation;
+				let end_rot = Quat::from_axis_angle(Vec3::Y, 90.0_f32.to_radians())
+					* Quat::from_axis_angle(Vec3::X, -89.9_f32.to_radians());
+				// Calculate current camera's effective size from its position and FOV
+				let current_distance = current_transform.translation.length();
+				let current_size = dolly_zoom_width(current_distance, start_fov);
+				let transform_tween = Tween::new(
+					EaseFunction::SmoothStep,
+					std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
+					DollyZoomLens {
+						start_fov,
+						end_fov,
+						start_rot,
+						end_rot,
+						start_size: current_size,
+						end_size,
+					},
+				);
+				let fov_tween = Tween::new(
+					EaseFunction::SmoothStep,
+					std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
+					ProjectionFovLens {
+						start: start_fov,
+						end: end_fov,
+					},
+				);
+				let pan_orbit_tween = Tween::new(
+					EaseFunction::SmoothStep,
+					std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
+					PanOrbitCameraLens {
+						start_fov,
+						end_fov,
+						start_rot,
+						end_rot,
+						start_size: current_size,
+						end_size,
+					},
+				);
+				commands
+					.entity(camera_entity)
+					.insert(Animator::new(transform_tween))
+					.insert(Animator::new(fov_tween))
+					.insert(Animator::new(pan_orbit_tween));
 			}
-
-			camera_mode.current_mode = new_mode;
+			// Orthographic → Perspective: 1-stage transition
+			(CameraState::Orthographic, CameraState::Perspective) => {
+				let end_size = world_size + PADDING; // TODO: Use settings.terrain.world_length().max(settings.terrain.world_width()) instead of hardcoded value
+				let (angled_transform, angled_projection) = create_perspective_angled_state(end_size);
+				let start_fov = if let Projection::Perspective(p) = current_projection {
+					p.fov
+				} else {
+					panic!("Expected perspective projection");
+				};
+				let end_fov = angled_projection.fov;
+				let start_rot = current_transform.rotation;
+				let end_transform = angled_transform;
+				let end_rot = end_transform.rotation;
+				// Calculate current camera's effective size from its position and FOV
+				let current_distance = current_transform.translation.length();
+				let current_size = dolly_zoom_width(current_distance, start_fov);
+				let transform_tween = Tween::new(
+					EaseFunction::SmoothStep,
+					std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
+					DollyZoomLens {
+						start_fov,
+						end_fov,
+						start_rot,
+						end_rot,
+						start_size: current_size,
+						end_size,
+					},
+				);
+				let fov_tween = Tween::new(
+					EaseFunction::SmoothStep,
+					std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
+					ProjectionFovLens {
+						start: start_fov,
+						end: end_fov,
+					},
+				);
+				let pan_orbit_tween = Tween::new(
+					EaseFunction::SmoothStep,
+					std::time::Duration::from_secs_f32(TOTAL_TRANSITION_TIME),
+					PanOrbitCameraLens {
+						start_fov,
+						end_fov,
+						start_rot,
+						end_rot,
+						start_size: current_size,
+						end_size,
+					},
+				);
+				commands
+					.entity(camera_entity)
+					.insert(Animator::new(transform_tween))
+					.insert(Animator::new(fov_tween))
+					.insert(Animator::new(pan_orbit_tween));
+			}
+			_ => unreachable!(),
 		}
+
+		camera_mode.current_mode = new_mode;
 	}
 }
 
@@ -375,20 +371,20 @@ fn cleanup_completed_tweens(
 ) {
 	if camera_mode.is_transitioning {
 		camera_mode.transition_timer.tick(time.delta());
-		if camera_mode.transition_timer.finished() {
-			if let Ok(camera_entity) = camera_query.single() {
-				// Remove the animator components
-				commands
-					.entity(camera_entity)
-					.remove::<Animator<Transform>>();
-				commands
-					.entity(camera_entity)
-					.remove::<Animator<Projection>>();
-				commands
-					.entity(camera_entity)
-					.remove::<Animator<PanOrbitCamera>>();
-				camera_mode.is_transitioning = false;
-			}
+		if camera_mode.transition_timer.finished()
+			&& let Ok(camera_entity) = camera_query.single()
+		{
+			// Remove the animator components
+			commands
+				.entity(camera_entity)
+				.remove::<Animator<Transform>>();
+			commands
+				.entity(camera_entity)
+				.remove::<Animator<Projection>>();
+			commands
+				.entity(camera_entity)
+				.remove::<Animator<PanOrbitCamera>>();
+			camera_mode.is_transitioning = false;
 		}
 	}
 }

@@ -84,11 +84,11 @@ impl Default for Settings {
 }
 
 impl Settings {
-	pub fn grid_x(&self) -> u32 {
+	pub const fn grid_x(&self) -> u32 {
 		self.base_grid_resolution * self.aspect_x
 	}
 
-	pub fn grid_z(&self) -> u32 {
+	pub const fn grid_z(&self) -> u32 {
 		self.base_grid_resolution * self.aspect_z
 	}
 
@@ -144,9 +144,9 @@ impl TerrainGenerator {
 	fn generate_height_map(&mut self, settings: &Settings) {
 		let noise = HybridMulti::<OpenSimplex>::new(settings.seed)
 			.set_octaves(settings.octaves as usize)
-			.set_frequency(settings.frequency as f64)
-			.set_lacunarity(settings.lacunarity as f64)
-			.set_persistence(settings.persistence as f64);
+			.set_frequency(settings.frequency)
+			.set_lacunarity(settings.lacunarity)
+			.set_persistence(settings.persistence);
 
 		// Values for normalization
 		let mut min_height = f32::INFINITY;
@@ -157,8 +157,8 @@ impl TerrainGenerator {
 				// Use spatial utilities for world coordinate conversion
 				let world_pos = grid_to_world(x, z, settings);
 				let height = self.calculate_height_at_position(
-					world_pos.x as f64,
-					world_pos.z as f64,
+					f64::from(world_pos.x),
+					f64::from(world_pos.z),
 					settings,
 					&noise,
 				) as f32;
@@ -185,8 +185,7 @@ impl TerrainGenerator {
 			}
 		} else {
 			panic!(
-				"Height range is {} (min: {}, max: {}). This indicates a bug in terrain generation.",
-				height_range, min_height, max_height
+				"Height range is {height_range} (min: {min_height}, max: {max_height}). This indicates a bug in terrain generation."
 			);
 		}
 	}
@@ -198,15 +197,14 @@ impl TerrainGenerator {
 		settings: &Settings,
 		noise: impl NoiseFn<f64, 2>,
 	) -> f64 {
-		let base_world_size = self.world_x.max(self.world_z) as f64;
+		let base_world_size = f64::from(self.world_x.max(self.world_z));
 
 		// Scale the offset inversely with frequency to maintain the same relative position
 		// when frequency changes (since noise function internally scales coordinates by frequency)
-		let sample_x = (x_pos / base_world_size) + (settings.offset_x as f64 / settings.frequency);
-		let sample_z = (z_pos / base_world_size) + (settings.offset_z as f64 / settings.frequency);
-		let height = noise.get([sample_x, sample_z]);
+		let sample_x = (x_pos / base_world_size) + (f64::from(settings.offset_x) / settings.frequency);
+		let sample_z = (z_pos / base_world_size) + (f64::from(settings.offset_z) / settings.frequency);
 
-		height
+		noise.get([sample_x, sample_z])
 	}
 
 	fn generate_mesh(&self, settings: &Settings) -> Mesh {
@@ -343,7 +341,7 @@ fn add_labeled_int_slider<T>(
 
 /// Helper function to add an info label with formatting
 fn add_info_label(ui: &mut egui::Ui, label: &str, args: std::fmt::Arguments) {
-	ui.label(&format!("{}: {}", label, args));
+	ui.label(format!("{label}: {args}"));
 }
 
 fn render_terrain_config_ui(ui: &mut egui::Ui, settings: &mut Settings) {
@@ -416,7 +414,7 @@ pub struct PlotTextureResource {
 	pub height: f32,
 }
 
-#[derive(Resource, Debug, PartialEq)]
+#[derive(Resource, Debug, PartialEq, Eq)]
 pub struct PlotWidth(pub usize);
 
 #[derive(Resource)]

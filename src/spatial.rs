@@ -27,8 +27,8 @@ pub fn grid_to_world(grid_x: u32, grid_z: u32, settings: &Settings) -> Vec3 {
 	let x_step = world_x / grid_x_count as f32;
 	let z_step = world_z / grid_z_count as f32;
 
-	let x_pos = (grid_x as f32 * x_step) - world_x / 2.0;
-	let z_pos = (grid_z as f32 * z_step) - world_z / 2.0;
+	let x_pos = (grid_x as f32).mul_add(x_step, -(world_x / 2.0));
+	let z_pos = (grid_z as f32).mul_add(z_step, -(world_z / 2.0));
 
 	Vec3::new(x_pos, 0.0, z_pos)
 }

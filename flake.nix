@@ -46,6 +46,7 @@
                   clang
                   pkg-config
                   cargo-binutils
+                  just
 
                   libGL
                   alsa-lib

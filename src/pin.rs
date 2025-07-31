@@ -115,13 +115,12 @@ fn move_pins_above_terrain(
 	drag_state: Res<PinDragState>,
 ) {
 	if let Ok(heightmap) = terrain_heightmap.single() {
-		for (entity, mut transform) in pin_transforms.iter_mut() {
+		for (entity, mut transform) in &mut pin_transforms {
 			// Skip positioning for the pin that's being dragged
-			if let Some(dragging_entity) = drag_state.dragging_pin {
-				if entity == dragging_entity {
+			if let Some(dragging_entity) = drag_state.dragging_pin
+				&& entity == dragging_entity {
 					continue;
 				}
-			}
 
 			// Get height using spatial utilities
 			let terrain_height = calculate_terrain_height(transform.translation, heightmap, &settings);
@@ -209,7 +208,7 @@ fn scale_pins_by_distance(
 		let reference_distance = 3000.0; // Distance at which pins have base scale
 		let min_scale = 1.0;
 
-		for mut pin_transform in pin_query.iter_mut() {
+		for mut pin_transform in &mut pin_query {
 			let distance = camera_pos.distance(pin_transform.translation);
 
 			// Calculate scale factor based on distance
@@ -226,10 +225,9 @@ fn on_pin_drag_end(
 	mut drag_state: ResMut<PinDragState>,
 	mut camera_mode: ResMut<CameraMode>,
 ) {
-	if let Some(dragging_entity) = drag_state.dragging_pin {
-		if dragging_entity == trigger.target() {
+	if let Some(dragging_entity) = drag_state.dragging_pin
+		&& dragging_entity == trigger.target() {
 			camera_mode.enable_camera_movement();
 			drag_state.dragging_pin = None;
 		}
-	}
 }

@@ -54,10 +54,10 @@ pub trait SaveableSettings: Serialize + for<'de> Deserialize<'de> + Default {
 		if ui.button(button_label).clicked() {
 			match self.save() {
 				Ok(()) => {
-					info!("{} saved successfully", button_label.replace(" ", ""));
+					info!("{} saved successfully", button_label.replace(' ', ""));
 				}
 				Err(e) => {
-					error!("Failed to save: {}", e);
+					error!("Failed to save: {e}");
 				}
 			}
 		}
