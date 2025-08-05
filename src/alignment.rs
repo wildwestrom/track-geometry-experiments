@@ -16,7 +16,7 @@ use crate::spatial::world_size_for_height;
 use crate::terrain;
 
 const MAX_TURNS: usize = 8;
-const GEOMETRY_DEBUG: u8 = 2; // Levels 0, 1, 2
+const GEOMETRY_DEBUG: u8 = 1; // Levels 0, 1, 2
 
 /// Gizmo configuration for alignment path visualization
 #[derive(Default, Reflect, GizmoConfigGroup)]
@@ -237,12 +237,15 @@ fn ui(
 				display_position(ui, "End (Blue)", end_pos);
 				ui.separator();
 
+				ui.label("Select Alignment:");
 				alignment_selection_ui(ui, &mut alignment_state);
 				ui.separator();
 
-				vertex_coordinates_ui(ui, &alignment_state);
+				ui.label("Vertices:");
+				vertex_properties_ui(ui, &mut alignment_state);
 				ui.separator();
 
+				ui.label("Create New Alignment:");
 				alignment_creation_ui(ui, &mut alignment_state, start_pos, end_pos);
 				ui.separator();
 
@@ -261,8 +264,6 @@ fn display_position(ui: &mut egui::Ui, label: &str, position: Vec3) {
 }
 
 fn alignment_selection_ui(ui: &mut egui::Ui, alignment_state: &mut AlignmentState) {
-	ui.label("Select Alignment:");
-
 	// Use a more efficient approach: iterate directly over keys without cloning
 	let mut alignment_keys: Vec<&usize> = alignment_state.alignments.keys().collect();
 	alignment_keys.sort();
@@ -287,23 +288,38 @@ fn alignment_selection_ui(ui: &mut egui::Ui, alignment_state: &mut AlignmentStat
 	}
 }
 
-fn vertex_coordinates_ui(ui: &mut egui::Ui, alignment_state: &AlignmentState) {
+fn vertex_properties_ui(ui: &mut egui::Ui, alignment_state: &mut AlignmentState) {
 	if alignment_state.turns > 0
-		&& let Some(alignment) = alignment_state.alignments.get(&alignment_state.turns)
+		&& let Some(alignment) = &mut alignment_state.alignments.get_mut(&alignment_state.turns)
 	{
-		let segments: &[PathSegment] = &alignment.segments;
-		ui.label("Vertices:");
-		for (i, segment) in segments.iter().enumerate() {
+		let segments: &mut [PathSegment] = &mut alignment.segments;
+		for (i, segment) in segments.iter_mut().enumerate() {
 			let vertex = segment.tangent_vertex;
-			ui.label(format!(
-				"V{}: ({:.2}, {:.2}, {:.2}), Angle: {:.2}, Radius: {:.2}",
-				i + 1,
-				vertex.x,
-				vertex.y,
-				vertex.z,
-				segment.circular_section_angle,
-				segment.circular_section_radius
-			));
+			egui::Grid::new(format!("turn_{i}"))
+				.num_columns(2)
+				.spacing(egui::Vec2::splat(2.0))
+				.show(ui, |ui| {
+					ui.label(format!("Vertex {:.2}:", i + 1));
+					ui.label(format!(
+						"({:.2}, {:.2}, {:.2})",
+						vertex.x, vertex.y, vertex.z,
+					));
+					ui.end_row();
+					ui.label("Angle:");
+					ui.add(
+						egui::Slider::new(
+							&mut segment.circular_section_angle,
+							0.0..=std::f32::consts::FRAC_PI_2,
+						)
+						.custom_formatter(|val, _| format!("{:.2?}°", val.to_degrees())),
+					);
+					ui.end_row();
+					ui.label("Radius:");
+					ui.add(egui::Slider::new(
+						&mut segment.circular_section_radius,
+						0_f32..=2000_f32,
+					));
+				});
 		}
 	}
 }
@@ -314,7 +330,6 @@ fn alignment_creation_ui(
 	start_pos: Vec3,
 	end_pos: Vec3,
 ) {
-	ui.label("Create New Alignment:");
 	ui.horizontal(|ui| {
 		ui.label("Turns:");
 

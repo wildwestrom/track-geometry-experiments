@@ -19,7 +19,7 @@ bevy = { version = "0.16.1", default-features = false, features = [
   "bevy_winit",
   "bevy_window",
   "multi_threaded",
-  "bevy_ui",
+  # "bevy_ui",
   "tonemapping_luts",
   "default_font",
   "bevy_log",
@@ -32,7 +32,7 @@ bevy = { version = "0.16.1", default-features = false, features = [
   "bevy_gizmos",
   # # non-default-features as of 0.16.1
   # "dynamic_linking", # use during development
-  "bevy_dev_tools",
+  # "bevy_dev_tools",
   "wayland",
   "serialize",
 ] }

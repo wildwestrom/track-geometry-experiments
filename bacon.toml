@@ -15,6 +15,7 @@ command = [
   "always",
   "--features",
   "bevy/dynamic_linking",
+  "bevy/dev_tools",
 ]
 need_stdout = false
 
