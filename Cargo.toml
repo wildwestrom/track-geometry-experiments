@@ -36,10 +36,8 @@ bevy = { version = "0.16.1", default-features = false, features = [
   "wayland",
   "serialize",
 ] }
-bevy_panorbit_camera = { version = "0.26.0", features = ["bevy_egui"] }
-# For some reason my shit breaks on 0.27.0 and above
-# Now on 0.26.0 the camera stays enabled even when I drag egui windows
-# Fuck
+bevy_panorbit_camera = { version = "=0.27.0", features = ["bevy_egui"] }
+# camera rotating breaks on 0.27.1
 bevy_egui = "0.35.1"
 log = { version = "0.4.27", features = [
   "max_level_debug",
