@@ -1,3 +1,5 @@
+cargo-features = ["codegen-backend"]
+
 [package]
 name = "track_geometry"
 version = "0.1.0"
@@ -31,10 +33,11 @@ bevy = { version = "0.16.1", default-features = false, features = [
   "bevy_gltf",
   "bevy_gizmos",
   # # non-default-features as of 0.16.1
-  # "dynamic_linking", # use during development
-  # "bevy_dev_tools",
   "wayland",
   "serialize",
+  # # use during development
+  # "dynamic_linking", 
+  # "bevy_dev_tools",
 ] }
 bevy_panorbit_camera = { version = "=0.27.0", features = ["bevy_egui"] }
 # camera rotating breaks on 0.27.1
@@ -53,10 +56,12 @@ spec_math = "0.1.6"
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]
 opt-level = 1
+codegen-backend = "cranelift"
 
 # Enable a large amount of optimization in the dev profile for dependencies.
 [profile.dev.package."*"]
 opt-level = 3
+codegen-backend = "llvm"
 
 # Enable more optimization in the release profile at the cost of compile time.
 [profile.release]

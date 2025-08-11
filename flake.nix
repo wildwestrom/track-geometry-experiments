@@ -57,6 +57,8 @@
 
                   cargo-watch
                   cargo-flamegraph
+                  cargo-machete
+                  cargo-unused-features
                   tracy-wayland
                   valgrind-light
                   heaptrack
