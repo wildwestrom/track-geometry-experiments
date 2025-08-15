@@ -13,9 +13,10 @@ command = [
   "check",
   "--color",
   "always",
-  "--features",
+  "-F",
   "bevy/dynamic_linking",
-  "bevy/dev_tools",
+  "-F",
+  "bevy/bevy_dev_tools",
 ]
 need_stdout = false
 
@@ -71,9 +72,10 @@ command = [
   "run",
   "--color",
   "always",
-  "--features",
+  "-F",
   "bevy/dynamic_linking",
-  # put launch parameters for your program behind a `--` separator
+  "-F",
+  "bevy/bevy_dev_tools",
 ]
 need_stdout = true
 allow_warnings = true
