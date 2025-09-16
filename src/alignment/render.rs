@@ -168,9 +168,19 @@ pub(crate) fn render_alignment_path(
 							arc_sweep,
 							circular_section_radius_i,
 							Isometry3d::new(o_i, Quat::from_axis_angle(Vec3::Y, -alpha_i)),
-							RED,
+							GREEN_YELLOW,
 						)
 						.resolution(CURVE_RESOLUTION);
+				}
+
+				let arc_end_point = {
+					let start_vector_from_center = f_i - o_i;
+					let rotation = Quat::from_axis_angle(Vec3::Y, arc_sweep);
+					o_i + rotation * start_vector_from_center
+				};
+
+				if geometry_debug_level >= 2 {
+					gizmos.sphere(Isometry3d::from_translation(arc_end_point), 8.0, YELLOW);
 				}
 
 				if geometry_debug_level >= 2 {
