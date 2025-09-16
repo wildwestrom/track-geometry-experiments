@@ -1,12 +1,12 @@
 use std::f64::consts::PI;
 
 use bevy::color::palettes::css::*;
-use bevy::math::ops::atan2;
 use bevy::prelude::*;
 use spec_math::Fresnel;
 
 use super::GeometryDebugLevel;
 use super::components::{AlignmentGizmos, AlignmentPoint, PointType};
+use super::geometry::{azimuth_of_tangent, difference_in_azimuth};
 use super::state::{Alignment, AlignmentState};
 
 const CURVE_RESOLUTION: u32 = 16;
@@ -371,23 +371,4 @@ fn circular_section_length(
 	difference_in_azimuth_i: f32,
 ) -> f32 {
 	circular_section_radius_i * (difference_in_azimuth_i - circular_section_angle_i)
-}
-
-fn difference_in_azimuth(azimuth_of_tangent_i: f32, azimuth_of_tangent_i_plus_1: f32) -> f32 {
-	use std::f32::consts::PI;
-	let mut diff = azimuth_of_tangent_i_plus_1 - azimuth_of_tangent_i;
-	if diff < 0.0 {
-		diff += 2.0 * PI;
-	}
-	if diff > PI {
-		diff = 2_f32.mul_add(PI, -diff);
-	}
-	diff
-}
-
-fn azimuth_of_tangent(tangent_vertex_i: Vec3, tangent_vertex_i_minus_1: Vec3) -> f32 {
-	let delta_x = tangent_vertex_i.x - tangent_vertex_i_minus_1.x;
-	let delta_z = tangent_vertex_i.z - tangent_vertex_i_minus_1.z;
-	let angle = atan2(delta_z, delta_x);
-	-angle
 }

@@ -3,6 +3,8 @@ use std::f64::consts::PI;
 use bevy::prelude::*;
 
 mod components;
+mod constraints;
+mod geometry;
 mod render;
 mod state;
 mod systems;
@@ -39,6 +41,7 @@ impl Plugin for AlignmentPlugin {
 			.add_systems(
 				Update,
 				(
+					constraints::enforce_alignment_constraints,
 					systems::update_alignment_from_pins,
 					systems::update_alignment_pins,
 					systems::update_alignment_from_intermediate_pins,

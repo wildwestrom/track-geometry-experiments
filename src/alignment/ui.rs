@@ -1,9 +1,9 @@
 use crate::saveable::SaveableSettings;
-use bevy::math::ops::atan2;
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 
 use super::components::{AlignmentPoint, PointType};
+use super::constraints::compute_max_angle;
 use super::state::{AlignmentState, PathSegment};
 use super::{
 	FRAC_PI_180, GeometryDebugLevel, MAX_ARC_RADIUS, MAX_GEOMETRY_DEBUG_LEVEL, MAX_TURNS,
@@ -75,26 +75,6 @@ pub(crate) fn ui(
 	}
 }
 
-// Local helpers to compute azimuth differences for constraints
-fn difference_in_azimuth(azimuth_of_tangent_i: f32, azimuth_of_tangent_i_plus_1: f32) -> f32 {
-	use std::f32::consts::PI;
-	let mut diff = azimuth_of_tangent_i_plus_1 - azimuth_of_tangent_i;
-	if diff < 0.0 {
-		diff += 2.0 * PI;
-	}
-	if diff > PI {
-		diff = 2_f32.mul_add(PI, -diff);
-	}
-	diff
-}
-
-fn azimuth_of_tangent(tangent_vertex_i: Vec3, tangent_vertex_i_minus_1: Vec3) -> f32 {
-	let delta_x = tangent_vertex_i.x - tangent_vertex_i_minus_1.x;
-	let delta_z = tangent_vertex_i.z - tangent_vertex_i_minus_1.z;
-	let angle = atan2(delta_z, delta_x);
-	-angle
-}
-
 fn display_position(ui: &mut egui::Ui, label: &str, position: Vec3) {
 	ui.label(format!(
 		"{}: ({:.2},{:.2},{:.2})",
@@ -152,12 +132,10 @@ fn vertex_properties_ui(ui: &mut egui::Ui, alignment_state: &mut AlignmentState)
 					));
 					ui.end_row();
 					ui.label("Angle:");
-					// Compute local azimuth difference to constrain angle
+					// Use shared constraints helper to determine slider max
 					let prev = neighbor_positions[i];
 					let next = neighbor_positions[i + 2];
-					let az_i = azimuth_of_tangent(vertex, prev);
-					let az_ip1 = azimuth_of_tangent(next, vertex);
-					let max_angle = difference_in_azimuth(az_i, az_ip1).max(0.001);
+					let max_angle = compute_max_angle(prev, vertex, next);
 					if !segment.circular_section_angle.is_finite() || segment.circular_section_angle < 0.0 {
 						segment.circular_section_angle = 0.0;
 					}
