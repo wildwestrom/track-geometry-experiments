@@ -70,7 +70,7 @@ pub(crate) fn render_alignment_path(
 
 				let unit_vector_i = unit_vector(tangent_vertex_i, tangent_vertex_i_minus_1);
 
-				if geometry_debug_level >= 2 {
+				if geometry_debug_level >= 3 {
 					gizmos.arc_3d(
 						azimuth_of_tangent_i,
 						150.0,
@@ -179,17 +179,11 @@ pub(crate) fn render_alignment_path(
 					o_i + rotation * start_vector_from_center
 				};
 
-				if geometry_debug_level >= 2 {
-					gizmos.sphere(Isometry3d::from_translation(arc_end_point), 8.0, YELLOW);
-				}
-
-				if geometry_debug_level >= 2 {
-					gizmos.sphere(Isometry3d::from_translation(f_i), 8.0, YELLOW);
-				}
-
 				let c_i = tangent_vertex_i + total_tangent_length_i * unit_vector_i_plus_1;
 
 				if geometry_debug_level >= 2 {
+					gizmos.sphere(Isometry3d::from_translation(arc_end_point), 8.0, YELLOW);
+					gizmos.sphere(Isometry3d::from_translation(f_i), 8.0, YELLOW);
 					gizmos.sphere(Isometry3d::from_translation(c_i), 10.0, YELLOW);
 				}
 

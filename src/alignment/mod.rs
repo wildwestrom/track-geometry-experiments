@@ -13,7 +13,7 @@ pub(crate) use state::{AlignmentState, load_alignment};
 
 pub(crate) const MAX_TURNS: usize = 8;
 pub(crate) const FRAC_PI_180: f64 = PI / 180.;
-pub(crate) const MAX_GEOMETRY_DEBUG_LEVEL: u8 = 2;
+pub(crate) const MAX_GEOMETRY_DEBUG_LEVEL: u8 = 3;
 pub(crate) const MIN_ARC_RADIUS: f32 = 1.0;
 pub(crate) const MAX_ARC_RADIUS: f32 = 2000.0;
 
