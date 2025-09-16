@@ -118,9 +118,10 @@ fn move_pins_above_terrain(
 		for (entity, mut transform) in &mut pin_transforms {
 			// Skip positioning for the pin that's being dragged
 			if let Some(dragging_entity) = drag_state.dragging_pin
-				&& entity == dragging_entity {
-					continue;
-				}
+				&& entity == dragging_entity
+			{
+				continue;
+			}
 
 			// Get height using spatial utilities
 			let terrain_height = calculate_terrain_height(transform.translation, heightmap, &settings);
@@ -226,8 +227,9 @@ fn on_pin_drag_end(
 	mut camera_mode: ResMut<CameraMode>,
 ) {
 	if let Some(dragging_entity) = drag_state.dragging_pin
-		&& dragging_entity == trigger.target() {
-			camera_mode.enable_camera_movement();
-			drag_state.dragging_pin = None;
-		}
+		&& dragging_entity == trigger.target()
+	{
+		camera_mode.enable_camera_movement();
+		drag_state.dragging_pin = None;
+	}
 }
