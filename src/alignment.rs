@@ -499,6 +499,19 @@ impl PathSegment {
 	}
 }
 
+// Distinguish endpoints (no curve params) from intermediate segments (with curve params)
+#[derive(Clone, Copy)]
+struct CurveParams {
+	radius: f32,
+	angle: f32,
+}
+
+#[derive(Clone, Copy)]
+struct WorkingVertex {
+	pos: Vec3,
+	params: Option<CurveParams>,
+}
+
 impl SaveableSettings for AlignmentState {
 	fn filename() -> &'static str {
 		"alignments.json"
@@ -578,22 +591,25 @@ fn render_alignment_path(
 	};
 
 	if let Some(alignment) = alignment_state.alignments.get(&alignment_state.turns) {
-		let segments = add_start_and_end_pins(start, end, alignment);
+		let vertices = build_working_vertices(start, end, alignment);
 		let mut c_i_minus_1 = None;
-		for i in 0..segments.len() - 1 {
+		for i in 0..vertices.len() - 1 {
 			let gizmos: &mut Gizmos<'_, '_, AlignmentGizmos> = &mut gizmos;
-			let segments: &[PathSegment] = &segments;
-			let segment_i = segments[i];
-			let segment_i_plus_1 = segments[i + 1];
-			let tangent_vertex_i = segment_i.tangent_vertex;
-			let tangent_vertex_i_plus_1 = segment_i_plus_1.tangent_vertex;
-			let circular_section_radius_i = segment_i.circular_section_radius;
-			let circular_section_angle_i = segment_i.circular_section_angle;
+			let vertices: &[WorkingVertex] = &vertices;
+			let vertex_i = vertices[i];
+			let vertex_i_plus_1 = vertices[i + 1];
+			let tangent_vertex_i = vertex_i.pos;
+			let tangent_vertex_i_plus_1 = vertex_i_plus_1.pos;
 			let unit_vector_i_plus_1 = unit_vector(tangent_vertex_i_plus_1, tangent_vertex_i);
 
 			if i > 0 {
-				let segment_i_minus_1 = segments[i - 1];
-				let tangent_vertex_i_minus_1 = segment_i_minus_1.tangent_vertex;
+				// Only compute curvature when current vertex has curve params (intermediate)
+				let Some(curve_params_i) = vertex_i.params else { continue };
+				let circular_section_radius_i = curve_params_i.radius;
+				let circular_section_angle_i = curve_params_i.angle;
+
+				let vertex_i_minus_1 = vertices[i - 1];
+				let tangent_vertex_i_minus_1 = vertex_i_minus_1.pos;
 				let azimuth_of_tangent_i = azimuth_of_tangent(tangent_vertex_i, tangent_vertex_i_minus_1);
 				let azimuth_of_tangent_i_plus_1 =
 					azimuth_of_tangent(tangent_vertex_i_plus_1, tangent_vertex_i);
@@ -614,7 +630,7 @@ fn render_alignment_path(
 						azimuth_of_tangent_i,
 						150.0, // radius
 						Isometry3d::new(
-							segments[i].tangent_vertex,
+							vertices[i].pos,
 							Quat::from_axis_angle(Vec3::Y, 0.),
 						),
 						Color::srgb(0.9, 1.0, 0.2), // yellow
@@ -632,7 +648,7 @@ fn render_alignment_path(
 						difference_in_azimuth_i,
 						200.0, // radius
 						Isometry3d::new(
-							segments[i].tangent_vertex,
+							vertices[i].pos,
 							Quat::from_axis_angle(Vec3::Y, azimuth_of_tangent_i),
 						),
 						Color::srgb(0.6, 0.0, 1.0), // purple
@@ -743,7 +759,7 @@ fn render_alignment_path(
 					} else {
 						gizmos.line(tangent_vertex_i_minus_1, t_i, AQUA);
 					}
-					if i == segments.len() - 2 {
+					if i == vertices.len() - 2 {
 						gizmos.line(c_i, tangent_vertex_i_plus_1, AQUA);
 					}
 				}
@@ -795,21 +811,30 @@ fn clothoid_point(
 	clothoid_endpoint + Vec3::new(i_x, 0.0, i_z)
 }
 
-fn add_start_and_end_pins(start: Vec3, end: Vec3, alignment: &Alignment) -> Vec<PathSegment> {
-	let mut full_alignment = Vec::new();
-	full_alignment.push(PathSegment::new(start));
-	let mut incomplete_alignment = alignment.segments.clone();
-	full_alignment.append(&mut incomplete_alignment);
-	full_alignment.push(PathSegment::new(end));
-	assert!(!full_alignment.is_empty(), "No path segments to work with");
-	for (i, s) in full_alignment.iter().enumerate() {
-		assert!(
-			s.tangent_vertex.is_finite(),
-			"tangent vertex {i} is not finite: {}",
-			s.tangent_vertex
-		);
+fn build_working_vertices(start: Vec3, end: Vec3, alignment: &Alignment) -> Vec<WorkingVertex> {
+	let mut full = Vec::new();
+	full.push(WorkingVertex {
+		pos: start,
+		params: None,
+	});
+	for seg in &alignment.segments {
+		full.push(WorkingVertex {
+			pos: seg.tangent_vertex,
+			params: Some(CurveParams {
+				radius: seg.circular_section_radius,
+				angle: seg.circular_section_angle,
+			}),
+		});
 	}
-	full_alignment
+	full.push(WorkingVertex {
+		pos: end,
+		params: None,
+	});
+	assert!(full.len() >= 2, "Need at least start and end vertices");
+	for (i, v) in full.iter().enumerate() {
+		assert!(v.pos.is_finite(), "vertex {i} is not finite: {}", v.pos);
+	}
+	full
 }
 
 fn alpha_i(start_vector: Vec3) -> f32 {
