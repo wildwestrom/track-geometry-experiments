@@ -1,10 +1,14 @@
 use crate::saveable::SaveableSettings;
+use bevy::math::ops::atan2;
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 
 use super::components::{AlignmentPoint, PointType};
 use super::state::{AlignmentState, PathSegment};
-use super::{FRAC_PI_180, GeometryDebugLevel, MAX_GEOMETRY_DEBUG_LEVEL, MAX_TURNS};
+use super::{
+	FRAC_PI_180, GeometryDebugLevel, MAX_ARC_RADIUS, MAX_GEOMETRY_DEBUG_LEVEL, MAX_TURNS,
+	MIN_ARC_RADIUS,
+};
 
 pub(crate) fn ui(
 	mut contexts: EguiContexts,
@@ -71,6 +75,26 @@ pub(crate) fn ui(
 	}
 }
 
+// Local helpers to compute azimuth differences for constraints
+fn difference_in_azimuth(azimuth_of_tangent_i: f32, azimuth_of_tangent_i_plus_1: f32) -> f32 {
+	use std::f32::consts::PI;
+	let mut diff = azimuth_of_tangent_i_plus_1 - azimuth_of_tangent_i;
+	if diff < 0.0 {
+		diff += 2.0 * PI;
+	}
+	if diff > PI {
+		diff = 2_f32.mul_add(PI, -diff);
+	}
+	diff
+}
+
+fn azimuth_of_tangent(tangent_vertex_i: Vec3, tangent_vertex_i_minus_1: Vec3) -> f32 {
+	let delta_x = tangent_vertex_i.x - tangent_vertex_i_minus_1.x;
+	let delta_z = tangent_vertex_i.z - tangent_vertex_i_minus_1.z;
+	let angle = atan2(delta_z, delta_x);
+	-angle
+}
+
 fn display_position(ui: &mut egui::Ui, label: &str, position: Vec3) {
 	ui.label(format!(
 		"{}: ({:.2},{:.2},{:.2})",
@@ -107,6 +131,14 @@ fn vertex_properties_ui(ui: &mut egui::Ui, alignment_state: &mut AlignmentState)
 		&& let Some(alignment) = &mut alignment_state.alignments.get_mut(&alignment_state.turns)
 	{
 		let segments: &mut [PathSegment] = &mut alignment.segments;
+		// Precompute neighbor positions to avoid borrowing conflicts
+		let mut neighbor_positions: Vec<Vec3> = Vec::with_capacity(segments.len() + 2);
+		neighbor_positions.push(alignment.start);
+		for s in segments.iter() {
+			neighbor_positions.push(s.tangent_vertex);
+		}
+		neighbor_positions.push(alignment.end);
+
 		for (i, segment) in segments.iter_mut().enumerate() {
 			let vertex = segment.tangent_vertex;
 			egui::Grid::new(format!("turn_{i}"))
@@ -120,20 +152,34 @@ fn vertex_properties_ui(ui: &mut egui::Ui, alignment_state: &mut AlignmentState)
 					));
 					ui.end_row();
 					ui.label("Angle:");
+					// Compute local azimuth difference to constrain angle
+					let prev = neighbor_positions[i];
+					let next = neighbor_positions[i + 2];
+					let az_i = azimuth_of_tangent(vertex, prev);
+					let az_ip1 = azimuth_of_tangent(next, vertex);
+					let max_angle = difference_in_azimuth(az_i, az_ip1).max(0.001);
+					if !segment.circular_section_angle.is_finite() || segment.circular_section_angle < 0.0 {
+						segment.circular_section_angle = 0.0;
+					}
+					if segment.circular_section_angle > max_angle {
+						segment.circular_section_angle = max_angle;
+					}
 					ui.add(
-						egui::Slider::new(
-							&mut segment.circular_section_angle,
-							0.0..=std::f32::consts::TAU,
-						)
-						.step_by(FRAC_PI_180)
-						.custom_parser(|s| s.parse::<f64>().ok().map(|f| f.to_radians()))
-						.custom_formatter(|val, _| format!("{:.0?}°", val.to_degrees())),
+						egui::Slider::new(&mut segment.circular_section_angle, 0.0..=max_angle)
+							.step_by(FRAC_PI_180)
+							.custom_parser(|s| s.parse::<f64>().ok().map(|f| f.to_radians()))
+							.custom_formatter(|val, _| format!("{:.0?}°", val.to_degrees())),
 					);
 					ui.end_row();
 					ui.label("Radius:");
+					// Enforce a minimum positive radius to avoid degenerate cases
+					if !segment.circular_section_radius.is_finite() || segment.circular_section_radius <= 0.0
+					{
+						segment.circular_section_radius = MIN_ARC_RADIUS;
+					}
 					ui.add(egui::Slider::new(
 						&mut segment.circular_section_radius,
-						0_f32..=2000_f32,
+						MIN_ARC_RADIUS..=MAX_ARC_RADIUS,
 					));
 				});
 		}
