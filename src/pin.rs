@@ -1,14 +1,14 @@
-use crate::{
-	camera::CameraMode,
-	spatial::{calculate_terrain_height, clamp_to_terrain_bounds},
-	terrain::{self, HeightMap, TerrainUpdateSet, raycast_terrain},
-};
+use crate::camera::CameraMode;
 use bevy::{
 	gltf::GltfAssetLabel,
 	picking::{Pickable, mesh_picking::MeshPickingPlugin},
 	prelude::*,
 	render::render_resource::Face,
 	window::PrimaryWindow,
+};
+use bevy_procedural_terrain_gen as terrain;
+use terrain::{
+	HeightMap, TerrainUpdateSet, calculate_terrain_height, clamp_to_terrain_bounds, raycast_terrain,
 };
 
 pub struct PinPlugin;

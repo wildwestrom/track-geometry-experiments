@@ -4,7 +4,8 @@ use bevy_panorbit_camera::{PanOrbitCamera, PanOrbitCameraPlugin};
 use bevy_tweening::{Animator, Lens, Targetable, Tween, TweeningPlugin};
 use std::f32::consts::PI;
 
-use crate::spatial::world_size;
+use bevy_procedural_terrain_gen as terrain;
+use terrain::spatial::world_size;
 
 pub struct CameraPlugin;
 
@@ -29,7 +30,7 @@ impl Plugin for CameraPlugin {
 	}
 }
 
-fn setup(mut commands: Commands, settings: Res<crate::terrain::Settings>) {
+fn setup(mut commands: Commands, settings: Res<terrain::Settings>) {
 	let world_size = world_size(&settings);
 	let (transform, perspective) = create_perspective_angled_state(world_size + 4206.9); // Just a random value to test its smooth
 
@@ -235,7 +236,7 @@ fn toggle_camera(
 	mut camera_mode: ResMut<CameraMode>,
 	mut commands: Commands,
 	camera_query: Query<(Entity, &Transform, &Projection, &PanOrbitCamera)>,
-	settings: Res<crate::terrain::Settings>,
+	settings: Res<terrain::Settings>,
 ) {
 	if keyboard_input.just_pressed(KeyCode::KeyT)
 		&& !camera_mode.is_transitioning

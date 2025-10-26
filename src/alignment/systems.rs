@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 
 use crate::pin::create_pin;
-use crate::spatial::world_size_for_height;
-use crate::terrain;
+use bevy_procedural_terrain_gen as terrain;
+use terrain::spatial::world_size_for_height;
 
 use super::components::{AlignmentPoint, PointType};
 use super::state::AlignmentState;

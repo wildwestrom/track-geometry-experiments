@@ -1,5 +1,9 @@
 cargo-features = ["codegen-backend"]
 
+[workspace]
+members = [".", "bevy_procedural_terrain_gen"]
+resolver = "3"
+
 [package]
 name = "track_geometry"
 version = "0.1.0"
@@ -13,7 +17,7 @@ categories = ["simulation", "visualization"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[dependencies]
+[workspace.dependencies]
 bevy = { version = "0.16.1", default-features = false, features = [
   "std",
   "bevy_pbr",
@@ -36,7 +40,7 @@ bevy = { version = "0.16.1", default-features = false, features = [
   "wayland",
   "serialize",
   # # use during development
-  # "dynamic_linking", 
+  # "dynamic_linking",
   # "bevy_dev_tools",
 ] }
 bevy_panorbit_camera = { version = "0.28.0", features = ["bevy_egui"] }
@@ -52,16 +56,29 @@ serde_json = "1.0"
 anyhow = "1.0"
 bevy_tweening = "0.13.0"
 spec_math = "0.1.6"
+bevy_procedural_terrain_gen = { path = "bevy_procedural_terrain_gen" }
+
+
+[dependencies]
+bevy = { workspace = true }
+bevy_panorbit_camera = { workspace = true }
+bevy_egui = { workspace = true }
+log = { workspace = true }
+anyhow = { workspace = true }
+bevy_tweening = { workspace = true }
+spec_math = { workspace = true }
+bevy_procedural_terrain_gen = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
 
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]
 opt-level = 1
-codegen-backend = "cranelift"
 
 # Enable a large amount of optimization in the dev profile for dependencies.
 [profile.dev.package."*"]
 opt-level = 3
-codegen-backend = "llvm"
 
 # Enable more optimization in the release profile at the cost of compile time.
 [profile.release]
@@ -81,9 +98,3 @@ inherits = "release"
 opt-level = "s"
 # Strip all debugging information from the binary to slightly reduce file size.
 strip = "debuginfo"
-
-# Profile for performance analysis with cargo-flamegraph
-[profile.perf]
-inherits = "release"
-# Enable debug symbols for profiling while keeping full optimizations
-debug = true
