@@ -59,46 +59,6 @@ impl Alignment {
 			segments: sections,
 		}
 	}
-
-	pub fn sample_elevation_profile(&self, num_samples: usize) -> Vec<(f32, f32)> {
-		let mut points = Vec::with_capacity(num_samples);
-		let mut vertices = Vec::with_capacity(self.segments.len() + 2);
-		vertices.push(self.start);
-		for seg in &self.segments {
-			vertices.push(seg.tangent_vertex);
-		}
-		vertices.push(self.end);
-
-		let mut segment_lengths = Vec::with_capacity(vertices.len() - 1);
-		let mut total_length = 0.0;
-		for i in 0..vertices.len() - 1 {
-			let len = vertices[i].distance(vertices[i + 1]);
-			segment_lengths.push(len);
-			total_length += len;
-		}
-
-		for i in 0..num_samples {
-			let t = i as f32 / (num_samples - 1) as f32;
-			let target_dist = t * total_length;
-			let mut acc = 0.0;
-			let mut seg_idx = 0;
-			while seg_idx < segment_lengths.len() && acc + segment_lengths[seg_idx] < target_dist {
-				acc += segment_lengths[seg_idx];
-				seg_idx += 1;
-			}
-			let seg_start = vertices[seg_idx];
-			let seg_end = vertices[seg_idx + 1];
-			let seg_len = segment_lengths[seg_idx];
-			let seg_t = if seg_len > 0.0 {
-				(target_dist - acc) / seg_len
-			} else {
-				0.0
-			};
-			let pos = seg_start.lerp(seg_end, seg_t);
-			points.push((target_dist, pos.y));
-		}
-		points
-	}
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone, Copy)]

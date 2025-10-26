@@ -11,7 +11,7 @@ mod systems;
 mod ui;
 
 pub(crate) use components::{AlignmentGizmos, configure_gizmos};
-pub(crate) use state::{AlignmentState, load_alignment};
+pub(crate) use state::load_alignment;
 
 pub(crate) const MAX_TURNS: usize = 8;
 pub(crate) const FRAC_PI_180: f64 = PI / 180.;
