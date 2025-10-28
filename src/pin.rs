@@ -1,4 +1,5 @@
 use crate::camera::CameraMode;
+
 use bevy::{
 	gltf::GltfAssetLabel,
 	picking::{Pickable, mesh_picking::MeshPickingPlugin},
@@ -136,7 +137,7 @@ fn move_pins_above_terrain(
 
 // Observer function to handle pin drag start
 fn on_pin_drag_start(
-	trigger: Trigger<Pointer<Pressed>>,
+	trigger: Trigger<Pointer<DragStart>>,
 	mut drag_state: ResMut<PinDragState>,
 	mut camera_mode: ResMut<CameraMode>,
 ) {
@@ -222,7 +223,7 @@ fn scale_pins_by_distance(
 
 // Observer function to handle pin drag end
 fn on_pin_drag_end(
-	trigger: Trigger<Pointer<Released>>,
+	trigger: Trigger<Pointer<DragEnd>>,
 	mut drag_state: ResMut<PinDragState>,
 	mut camera_mode: ResMut<CameraMode>,
 ) {
