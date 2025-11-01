@@ -18,7 +18,7 @@ categories = ["simulation", "visualization"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [workspace.dependencies]
-bevy = { version = "0.16.1", default-features = false, features = [
+bevy = { version = "0.17.2", default-features = false, features = [
   "std",
   "bevy_pbr",
   "bevy_text",
@@ -32,6 +32,7 @@ bevy = { version = "0.16.1", default-features = false, features = [
   "bevy_picking",
   "bevy_mesh_picking_backend",
   "bevy_ui_picking_backend",
+  "bevy_post_process",
   # "png",
   "bevy_scene",
   "bevy_gltf",
@@ -43,9 +44,9 @@ bevy = { version = "0.16.1", default-features = false, features = [
   # "dynamic_linking",
   # "bevy_dev_tools",
 ] }
-bevy_panorbit_camera = { version = "0.28.0", features = ["bevy_egui"] }
+bevy_panorbit_camera = { version = "0.31.0", features = ["bevy_egui"] }
 # camera rotating breaks on 0.27.1
-bevy_egui = "0.36.0"
+bevy_egui = "0.38.0"
 log = { version = "0.4.28", features = [
   "max_level_debug",
   "release_max_level_warn",
@@ -54,7 +55,7 @@ noise = "0.9.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
-bevy_tweening = "0.13.0"
+bevy_tweening = "0.14.0"
 spec_math = "0.1.6"
 bevy_procedural_terrain_gen = { path = "bevy_procedural_terrain_gen" }
 

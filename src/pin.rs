@@ -27,18 +27,12 @@ impl Plugin for PinPlugin {
 					scale_pins_by_distance,
 				),
 			)
-			.add_plugins(MeshPickingPlugin)
-			.insert_resource(PinDragState::default());
+			.add_plugins(MeshPickingPlugin);
 	}
 }
 
 #[derive(Component)]
 pub struct Pin;
-
-#[derive(Resource, Default)]
-pub struct PinDragState {
-	dragging_pin: Option<Entity>,
-}
 
 pub fn create_pin(
 	initial_position: Vec3,
@@ -110,91 +104,64 @@ pub fn create_pin(
 }
 
 fn move_pins_above_terrain(
-	mut pin_transforms: Query<(Entity, &mut Transform), With<Pin>>,
-	terrain_heightmap: Query<&HeightMap>,
+	mut pin_transforms: Query<&mut Transform, With<Pin>>,
+	terrain_heightmap: Single<&HeightMap>,
 	settings: Res<terrain::Settings>,
-	drag_state: Res<PinDragState>,
 ) {
-	if let Ok(heightmap) = terrain_heightmap.single() {
-		for (entity, mut transform) in &mut pin_transforms {
-			// Skip positioning for the pin that's being dragged
-			if let Some(dragging_entity) = drag_state.dragging_pin
-				&& entity == dragging_entity
-			{
-				continue;
-			}
+	let heightmap = *terrain_heightmap;
+	for mut transform in &mut pin_transforms {
+		// Get height using spatial utilities
+		let terrain_height = calculate_terrain_height(transform.translation, heightmap, &settings);
 
-			// Get height using spatial utilities
-			let terrain_height = calculate_terrain_height(transform.translation, heightmap, &settings);
-
-			// Position the base so its bottom sits on the terrain surface
-			transform.translation.y = terrain_height;
-		}
-	} else {
-		warn!("No heightmap found");
+		// Position the base so its bottom sits on the terrain surface
+		transform.translation.y = terrain_height;
 	}
 }
 
 // Observer function to handle pin drag start
-fn on_pin_drag_start(
-	trigger: Trigger<Pointer<DragStart>>,
-	mut drag_state: ResMut<PinDragState>,
-	mut camera_mode: ResMut<CameraMode>,
-) {
-	drag_state.dragging_pin = Some(trigger.target());
-
+fn on_pin_drag_start(_trigger: On<Pointer<DragStart>>, mut camera_mode: ResMut<CameraMode>) {
 	// Disable camera movement while dragging
 	camera_mode.disable_camera_movement();
 }
 
 /// Observer to update pin position when dragging (combines cursor raycast + position update)
 fn on_pin_drag_update(
-	trigger: Trigger<Pointer<Drag>>,
-	windows: Query<&Window, With<PrimaryWindow>>,
-	camera_query: Query<(&Camera, &GlobalTransform), With<bevy_panorbit_camera::PanOrbitCamera>>,
-	terrain_heightmap: Query<&HeightMap>,
+	on: On<Pointer<Drag>>,
+	window: Single<&Window, With<PrimaryWindow>>,
+	camera_query: Single<(&Camera, &GlobalTransform), With<bevy_panorbit_camera::PanOrbitCamera>>,
+	terrain_heightmap: Single<&HeightMap>,
 	settings: Res<terrain::Settings>,
 	mut pin_query: Query<&mut Transform, With<Pin>>,
-	drag_state: Res<PinDragState>,
 ) {
-	// Only update if this entity is currently being dragged
-	if let Some(dragging_entity) = drag_state.dragging_pin {
-		if dragging_entity != trigger.target() {
-			return;
-		}
-	} else {
-		return;
-	}
-
-	// Get the pin transform for the dragged entity
-	let Ok(mut pin_transform) = pin_query.get_mut(trigger.target()) else {
-		return;
+	let Ok(mut pin_transform) = pin_query.get_mut(on.event().entity) else {
+		// Unless my mental model is wrong, if this gets triggered,
+		// that means whatever was being dragged was not a pin.
+		panic!("If this gets triggered, that means whatever was being dragged was not a pin");
 	};
 
-	let Ok(window) = windows.single() else {
-		return;
-	};
+	let (camera, camera_transform) = *camera_query;
+
 	let Some(cursor_pos) = window.cursor_position() else {
-		return;
-	};
-	let Ok((camera, camera_transform)) = camera_query.single() else {
-		return;
-	};
-
-	// Get the heightmap for terrain intersection
-	let Ok(heightmap) = terrain_heightmap.single() else {
+		warn!("No cursor position found");
 		return;
 	};
 
 	// Raycast from camera through cursor
-	if let Ok(ray) = camera.viewport_to_world(camera_transform, cursor_pos) {
-		// Perform ray-terrain intersection by stepping along the ray
-		if let Some(intersection) = raycast_terrain(&ray, heightmap, &settings) {
-			// Clamp position to terrain bounds and update pin position directly
-			let clamped_pos = clamp_to_terrain_bounds(intersection, &settings);
-			pin_transform.translation.x = clamped_pos.x;
-			pin_transform.translation.z = clamped_pos.z;
-			pin_transform.translation.y = clamped_pos.y;
+	match camera.viewport_to_world(camera_transform, cursor_pos) {
+		Ok(ray) => {
+			// TODO: Replace with bevy's built in raycasting system
+			if let Some(intersection) = raycast_terrain(&ray, &terrain_heightmap, &settings) {
+				// Clamp position to terrain bounds and update pin position directly
+				let clamped_pos = clamp_to_terrain_bounds(intersection, &settings);
+				pin_transform.translation.x = clamped_pos.x;
+				pin_transform.translation.z = clamped_pos.z;
+				pin_transform.translation.y = clamped_pos.y;
+			} else {
+				panic!("No intersection found between ray and terrain");
+			}
+		}
+		Err(e) => {
+			warn!("Failed to create a ray due to {e}");
 		}
 	}
 }
@@ -202,35 +169,25 @@ fn on_pin_drag_update(
 /// System to scale pins based on their distance from the camera
 fn scale_pins_by_distance(
 	mut pin_query: Query<&mut Transform, With<Pin>>,
-	camera_query: Query<&GlobalTransform, With<bevy_panorbit_camera::PanOrbitCamera>>,
+	camera_query: Single<&GlobalTransform, With<bevy_panorbit_camera::PanOrbitCamera>>,
 ) {
-	if let Ok(camera_transform) = camera_query.single() {
-		let camera_pos = camera_transform.translation();
+	let camera_transform = *camera_query;
+	let camera_pos = camera_transform.translation();
 
-		let reference_distance = 3000.0; // Distance at which pins have base scale
-		let min_scale = 1.0;
+	let reference_distance = 3000.0; // Distance at which pins have base scale
+	let min_scale = 1.0;
 
-		for mut pin_transform in &mut pin_query {
-			let distance = camera_pos.distance(pin_transform.translation);
+	for mut pin_transform in &mut pin_query {
+		let distance = camera_pos.distance(pin_transform.translation);
 
-			// Calculate scale factor based on distance
-			// As distance increases, scale increases to maintain visual size
-			let scale_factor = (distance / reference_distance).max(min_scale);
-			pin_transform.scale = Vec3::splat(scale_factor);
-		}
+		// Calculate scale factor based on distance
+		// As distance increases, scale increases to maintain visual size
+		let scale_factor = (distance / reference_distance).max(min_scale);
+		pin_transform.scale = Vec3::splat(scale_factor);
 	}
 }
 
 // Observer function to handle pin drag end
-fn on_pin_drag_end(
-	trigger: Trigger<Pointer<DragEnd>>,
-	mut drag_state: ResMut<PinDragState>,
-	mut camera_mode: ResMut<CameraMode>,
-) {
-	if let Some(dragging_entity) = drag_state.dragging_pin
-		&& dragging_entity == trigger.target()
-	{
-		camera_mode.enable_camera_movement();
-		drag_state.dragging_pin = None;
-	}
+fn on_pin_drag_end(_: On<Pointer<DragEnd>>, mut camera_mode: ResMut<CameraMode>) {
+	camera_mode.enable_camera_movement();
 }

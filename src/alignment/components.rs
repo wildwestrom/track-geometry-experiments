@@ -1,7 +1,7 @@
+use bevy::camera::visibility::RenderLayers;
 use bevy::color::palettes::css::*;
 use bevy::gizmos::config::{GizmoConfigGroup, GizmoConfigStore};
 use bevy::prelude::*;
-use bevy::render::view::RenderLayers;
 
 #[derive(Component)]
 pub(crate) struct AlignmentPoint {
