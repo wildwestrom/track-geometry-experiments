@@ -36,6 +36,7 @@ fn main() {
 		.add_plugins(TerrainIntegrationPlugin)
 		.add_plugins(PinPlugin)
 		.add_plugins(AlignmentPlugin)
+		//.add_plugins(hud::CameraDebugHud)
 		.add_plugins(WireframePlugin::default())
 		.insert_resource(WireframeConfig {
 			global: false,

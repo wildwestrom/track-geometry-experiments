@@ -238,13 +238,11 @@ fn toggle_camera(
 	keyboard_input: Res<ButtonInput<KeyCode>>,
 	mut camera_mode: ResMut<CameraMode>,
 	mut commands: Commands,
-	camera_query: Query<(Entity, &Transform, &Projection, &PanOrbitCamera)>,
+	camera_query: Single<(Entity, &Transform, &Projection, &PanOrbitCamera)>,
 	settings: Res<terrain::Settings>,
 ) {
-	if keyboard_input.just_pressed(KeyCode::KeyT)
-		&& !camera_mode.is_transitioning
-		&& let Ok((camera_entity, current_transform, current_projection, _)) = camera_query.single()
-	{
+	if keyboard_input.just_pressed(KeyCode::KeyT) && !camera_mode.is_transitioning {
+		let (camera_entity, current_transform, current_projection, _panorbit_camera) = *camera_query;
 		let new_mode = camera_mode.current_mode.next();
 		camera_mode.is_transitioning = true;
 
@@ -421,14 +419,12 @@ fn cleanup_completed_tweens(
 
 fn disable_camera_during_transition(
 	camera_mode: Res<CameraMode>,
-	mut camera_query: Query<&mut PanOrbitCamera>,
+	mut camera: Single<&mut PanOrbitCamera>,
 ) {
-	if let Ok(mut camera) = camera_query.single_mut() {
-		if camera_mode.is_camera_transitioning() {
-			camera.enabled = false;
-		} else {
-			camera.enabled = camera_mode.is_camera_movement_enabled();
-		}
+	if camera_mode.is_camera_transitioning() {
+		camera.enabled = false;
+	} else {
+		camera.enabled = camera_mode.is_camera_movement_enabled();
 	}
 }
 
