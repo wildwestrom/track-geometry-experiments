@@ -2,15 +2,12 @@ use crate::camera::CameraMode;
 
 use bevy::{
 	gltf::GltfAssetLabel,
-	picking::{Pickable, mesh_picking::MeshPickingPlugin},
+	picking::{Pickable, backend::ray::RayMap, mesh_picking::MeshPickingPlugin},
 	prelude::*,
 	render::render_resource::Face,
-	window::PrimaryWindow,
 };
-use bevy_procedural_terrain_gen as terrain;
-use terrain::{
-	HeightMap, TerrainUpdateSet, calculate_terrain_height, clamp_to_terrain_bounds, raycast_terrain,
-};
+use bevy_procedural_terrain_gen::{self as terrain, TerrainMesh};
+use terrain::{HeightMap, TerrainUpdateSet, calculate_terrain_height};
 
 pub struct PinPlugin;
 
@@ -27,7 +24,10 @@ impl Plugin for PinPlugin {
 					scale_pins_by_distance,
 				),
 			)
-			.add_plugins(MeshPickingPlugin);
+			.add_plugins(MeshPickingPlugin)
+			.add_observer(on_pin_drag_update)
+			.add_observer(on_pin_drag_start)
+			.add_observer(on_pin_drag_end);
 	}
 }
 
@@ -85,9 +85,6 @@ pub fn create_pin(
 				InheritedVisibility::default(),
 				ViewVisibility::default(),
 			))
-			.observe(on_pin_drag_start)
-			.observe(on_pin_drag_end)
-			.observe(on_pin_drag_update)
 			.with_children(|parent| {
 				parent.spawn((
 					Mesh3d(needle_mesh),
@@ -119,50 +116,59 @@ fn move_pins_above_terrain(
 }
 
 // Observer function to handle pin drag start
-fn on_pin_drag_start(_trigger: On<Pointer<DragStart>>, mut camera_mode: ResMut<CameraMode>) {
-	// Disable camera movement while dragging
-	camera_mode.disable_camera_movement();
+fn on_pin_drag_start(
+	drag_start: On<Pointer<DragStart>>,
+	pin_query: Query<Entity, With<Pin>>,
+	mut camera_mode: ResMut<CameraMode>,
+) {
+	if let Ok(_) = pin_query.get(drag_start.entity) {
+		// Disable camera movement while dragging
+		camera_mode.disable_camera_movement();
+	}
 }
 
-/// Observer to update pin position when dragging (combines cursor raycast + position update)
-fn on_pin_drag_update(
-	on: On<Pointer<Drag>>,
-	window: Single<&Window, With<PrimaryWindow>>,
-	camera_query: Single<(&Camera, &GlobalTransform), With<bevy_panorbit_camera::PanOrbitCamera>>,
-	terrain_heightmap: Single<&HeightMap>,
-	settings: Res<terrain::Settings>,
-	mut pin_query: Query<&mut Transform, With<Pin>>,
+// Observer function to handle pin drag end
+fn on_pin_drag_end(
+	drag_end: On<Pointer<DragEnd>>,
+	pin_query: Query<Entity, With<Pin>>,
+	mut camera_mode: ResMut<CameraMode>,
 ) {
-	let Ok(mut pin_transform) = pin_query.get_mut(on.event().entity) else {
-		// Unless my mental model is wrong, if this gets triggered,
-		// that means whatever was being dragged was not a pin.
-		panic!("If this gets triggered, that means whatever was being dragged was not a pin");
-	};
+	if let Ok(_) = pin_query.get(drag_end.entity) {
+		// Disable camera movement while dragging
+		camera_mode.enable_camera_movement();
+	}
+}
 
-	let (camera, camera_transform) = *camera_query;
-
-	let Some(cursor_pos) = window.cursor_position() else {
-		warn!("No cursor position found");
+/// Observer to update pin position when dragging
+fn on_pin_drag_update(
+	drag: On<Pointer<Drag>>,
+	terrain_mesh: Single<Entity, With<TerrainMesh>>,
+	mut pin_transform_query: Query<&mut Transform, With<Pin>>,
+	camera_query: Single<Entity, With<bevy_panorbit_camera::PanOrbitCamera>>,
+	ray_map: Res<RayMap>,
+	mut raycast: MeshRayCast,
+) {
+	let Ok(mut pin_transform) = pin_transform_query.get_mut(drag.entity) else {
 		return;
 	};
 
-	// Raycast from camera through cursor
-	match camera.viewport_to_world(camera_transform, cursor_pos) {
-		Ok(ray) => {
-			// TODO: Replace with bevy's built in raycasting system
-			if let Some(intersection) = raycast_terrain(&ray, &terrain_heightmap, &settings) {
-				// Clamp position to terrain bounds and update pin position directly
-				let clamped_pos = clamp_to_terrain_bounds(intersection, &settings);
-				pin_transform.translation.x = clamped_pos.x;
-				pin_transform.translation.z = clamped_pos.z;
-				pin_transform.translation.y = clamped_pos.y;
-			} else {
-				panic!("No intersection found between ray and terrain");
-			}
-		}
-		Err(e) => {
-			warn!("Failed to create a ray due to {e}");
-		}
+	let Some((_, ray)) = ray_map
+		.iter()
+		.filter(|(ray_id, _)| ray_id.camera == *camera_query)
+		.next()
+	else {
+		return;
+	};
+	let filter = |e: Entity| e == *terrain_mesh;
+	let raycast_settings = MeshRayCastSettings::default().with_filter(&filter);
+	let hits = raycast.cast_ray(*ray, &raycast_settings);
+	if let Some((_, hit)) = hits
+		.iter()
+		.filter(|(entity, _)| *entity == *terrain_mesh)
+		.next()
+	{
+		let point = hit.point;
+		pin_transform.translation = point;
 	}
 }
 
@@ -185,9 +191,4 @@ fn scale_pins_by_distance(
 		let scale_factor = (distance / reference_distance).max(min_scale);
 		pin_transform.scale = Vec3::splat(scale_factor);
 	}
-}
-
-// Observer function to handle pin drag end
-fn on_pin_drag_end(_: On<Pointer<DragEnd>>, mut camera_mode: ResMut<CameraMode>) {
-	camera_mode.enable_camera_movement();
 }

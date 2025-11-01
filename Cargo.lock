@@ -355,6 +355,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_anti_alias"
+version = "0.17.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38c1adb85fe0956d6c3b6f90777b829785bb7e29a48f58febeeefd2bad317713"
+dependencies = [
+ "bevy_app",
+ "bevy_asset",
+ "bevy_camera",
+ "bevy_core_pipeline",
+ "bevy_derive",
+ "bevy_diagnostic",
+ "bevy_ecs",
+ "bevy_image",
+ "bevy_math",
+ "bevy_reflect",
+ "bevy_render",
+ "bevy_shader",
+ "bevy_utils",
+ "tracing",
+]
+
+[[package]]
 name = "bevy_app"
 version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -771,6 +793,7 @@ checksum = "f43985739584f3a5d43026aa1edd772f064830be46c497518f05f7dfbc886bba"
 dependencies = [
  "bevy_a11y",
  "bevy_android",
+ "bevy_anti_alias",
  "bevy_app",
  "bevy_asset",
  "bevy_camera",
@@ -1382,6 +1405,7 @@ dependencies = [
  "bevy_image",
  "bevy_input",
  "bevy_math",
+ "bevy_picking",
  "bevy_platform",
  "bevy_reflect",
  "bevy_sprite",
@@ -1395,6 +1419,7 @@ dependencies = [
  "taffy",
  "thiserror 2.0.17",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
