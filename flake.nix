@@ -34,6 +34,7 @@
           default = pkgs.mkShell {
             packages = with pkgs; [
               rust-toolchain
+              wgsl-analyzer
               stdenv.cc.cc.lib
               mold
               clang

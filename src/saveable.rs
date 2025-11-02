@@ -1,6 +1,6 @@
 use anyhow::Result;
 use bevy_egui::egui;
-use log::{error, info};
+use log::{error, debug};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -35,7 +35,7 @@ pub trait SaveableSettings: Serialize + for<'de> Deserialize<'de> + Default {
 	fn load_or_default() -> Self {
 		match Self::load() {
 			Ok(settings) => {
-				info!("Loaded {} from file", Self::filename());
+				debug!("Loaded {} from file", Self::filename());
 				settings
 			}
 			Err(e) => {
@@ -54,7 +54,7 @@ pub trait SaveableSettings: Serialize + for<'de> Deserialize<'de> + Default {
 		if ui.button(button_label).clicked() {
 			match self.save() {
 				Ok(()) => {
-					info!("{} saved successfully", button_label.replace(' ', ""));
+					debug!("{} saved successfully", button_label.replace(' ', ""));
 				}
 				Err(e) => {
 					error!("Failed to save: {e}");

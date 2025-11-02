@@ -11,7 +11,7 @@ edition = "2024"
 description = "A playground for visualizing and optimzing railway alignments"
 license-file = "./LICENSE"
 repository = "https://github.com/wildwestrom/track-geometry-experiments"
-readme = "./README.MD"
+readme = "./README.md"
 keywords = ["geometry", "railway", "road", "optimization"]
 categories = ["simulation", "visualization"]
 
@@ -28,7 +28,7 @@ bevy = { version = "0.17.2", default-features = false, features = [
   # "bevy_audio",
   "bevy_camera",
   "bevy_color",
-  # "bevy_core_pipeline",
+  "bevy_core_pipeline",
   # "bevy_gilrs",
   "bevy_gizmos",
   "bevy_gltf",
@@ -61,7 +61,7 @@ bevy = { version = "0.17.2", default-features = false, features = [
   # "ktx2",
   "multi_threaded",
   # "png",
-  # "reflect_auto_register",
+  "reflect_auto_register",
   # "smaa_luts",
   "std",
   # "sysinfo_plugin",

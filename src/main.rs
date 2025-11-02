@@ -13,6 +13,7 @@ mod camera;
 //mod hud;
 mod pin;
 mod saveable;
+mod terrain_contour;
 mod terrain_integration;
 
 use crate::alignment::AlignmentPlugin;
@@ -52,7 +53,7 @@ fn toggle_wireframe_system(
 ) {
 	if keyboard_input.just_pressed(KeyCode::Space) {
 		config.global = !config.global;
-		info!(
+		debug!(
 			"Wireframe mode: {}",
 			if config.global { "ON" } else { "OFF" }
 		);
