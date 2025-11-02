@@ -2,7 +2,8 @@ use std::f64::consts::PI;
 
 use bevy::color::palettes::css::*;
 use bevy::prelude::*;
-use spec_math::Fresnel;
+
+use crate::alignment::geometry::{alpha_i, clothoid_point, f_i, o_i, unit_vector, w_i};
 
 use super::GeometryDebugLevel;
 use super::components::{AlignmentGizmos, AlignmentPoint, PointType};
@@ -224,27 +225,6 @@ pub(crate) fn render_alignment_path(
 	}
 }
 
-fn clothoid_point(
-	s: f64,
-	clothoid_endpoint: Vec3,
-	l_c_abs: f64,
-	beta_i: f64,
-	fresnel_scale: f64,
-	fresnel_scale_sign: f64,
-) -> Vec3 {
-	let tilde_s = s * l_c_abs;
-	let fresnel_arg = tilde_s / fresnel_scale;
-	let fresnel = fresnel_arg.fresnel();
-	let i_x = (fresnel_scale
-		* ((beta_i * fresnel_scale_sign).cos() * fresnel.c
-			- (beta_i * fresnel_scale_sign).sin() * fresnel.s)) as f32;
-	let i_z = (fresnel_scale_sign
-		* fresnel_scale
-		* ((beta_i * fresnel_scale_sign).sin() * fresnel.c
-			+ (beta_i * fresnel_scale_sign).cos() * fresnel.s)) as f32;
-	clothoid_endpoint + Vec3::new(i_x, 0.0, i_z)
-}
-
 fn build_working_vertices(start: Vec3, end: Vec3, alignment: &Alignment) -> Vec<WorkingVertex> {
 	let mut full = Vec::new();
 	full.push(WorkingVertex {
@@ -271,43 +251,6 @@ fn build_working_vertices(start: Vec3, end: Vec3, alignment: &Alignment) -> Vec<
 	full
 }
 
-fn alpha_i(start_vector: Vec3) -> f32 {
-	start_vector.z.atan2(start_vector.x)
-}
-
-fn o_i(circular_section_radius_i: f32, f_i: Vec3, w_i: Vec3) -> Vec3 {
-	f_i + circular_section_radius_i * w_i
-}
-
-fn w_i(lambda_i: f32, clothoid_end_tangent_angle: f32) -> Vec3 {
-	if lambda_i > 0.0 {
-		Vec3::new(
-			-(clothoid_end_tangent_angle.sin()),
-			0.0,
-			clothoid_end_tangent_angle.cos(),
-		)
-	} else {
-		Vec3::new(
-			clothoid_end_tangent_angle.sin(),
-			0.0,
-			-(clothoid_end_tangent_angle.cos()),
-		)
-	}
-}
-
-fn f_i(t_i: Vec3, l_c_abs: f64, beta_i: f64, fresnel_scale: f64, fresnel_scale_sign: f64) -> Vec3 {
-	let fresnel_arg = l_c_abs / fresnel_scale;
-	let fresnel = fresnel_arg.fresnel();
-	let i_x = (fresnel_scale
-		* ((beta_i * fresnel_scale_sign).cos() * fresnel.c
-			- (beta_i * fresnel_scale_sign).sin() * fresnel.s)) as f32;
-	let i_z = (fresnel_scale_sign
-		* fresnel_scale
-		* ((beta_i * fresnel_scale_sign).sin() * fresnel.c
-			+ (beta_i * fresnel_scale_sign).cos() * fresnel.s)) as f32;
-	t_i + Vec3::new(i_x, 0.0, i_z)
-}
-
 fn get_start_and_end_points(
 	alignment_state: &Res<'_, AlignmentState>,
 	alignment_pins: Query<'_, '_, (&Transform, &AlignmentPoint)>,
@@ -330,8 +273,4 @@ fn get_start_and_end_points(
 		return None;
 	}
 	Some((start, end))
-}
-
-fn unit_vector(tangent_vertex_i: Vec3, tangent_vertex_i_minus_1: Vec3) -> Vec3 {
-	(tangent_vertex_i - tangent_vertex_i_minus_1).normalize()
 }
