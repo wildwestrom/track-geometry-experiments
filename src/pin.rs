@@ -244,23 +244,41 @@ fn on_pin_drag_update(
 	}
 }
 
-/// System to scale pins based on their distance from the camera
+/// System to scale pins based on their distance from the camera and FOV
 fn scale_pins_by_distance(
 	mut pin_query: Query<&mut Transform, With<Pin>>,
-	camera_query: Single<&GlobalTransform, With<bevy_panorbit_camera::PanOrbitCamera>>,
+	camera_query: Single<(&GlobalTransform, &Projection), With<bevy_panorbit_camera::PanOrbitCamera>>,
 ) {
-	let camera_transform = *camera_query;
+	let (camera_transform, camera_projection) = *camera_query;
 	let camera_pos = camera_transform.translation();
 
+	// Get current FOV from the camera projection
+	let current_fov = if let Projection::Perspective(persp) = camera_projection {
+		persp.fov
+	} else {
+		// Shouldn't happen since we're using perspective projection, but handle gracefully
+		return;
+	};
+
 	let reference_distance = 3000.0; // Distance at which pins have base scale
+	let reference_fov = 60.0_f32.to_radians(); // Reference FOV (normal perspective mode)
 	let min_scale = 1.0;
+
+	// Calculate FOV-based scale factor
+	// When FOV is very small (orthographic-like), objects appear larger, so we need to scale down
+	// The relationship is: apparent_size ∝ tan(FOV/2)
+	// Thank you LLMs. Would've taken me ages to figure out the math.
+	let fov_scale_factor = (current_fov * 0.5).tan() / (reference_fov * 0.5).tan();
 
 	for mut pin_transform in &mut pin_query {
 		let distance = camera_pos.distance(pin_transform.translation);
 
 		// Calculate scale factor based on distance
 		// As distance increases, scale increases to maintain visual size
-		let scale_factor = (distance / reference_distance).max(min_scale);
+		let distance_scale_factor = (distance / reference_distance).max(min_scale);
+
+		// Combine distance and FOV scale factors
+		let scale_factor = distance_scale_factor * fov_scale_factor;
 		pin_transform.scale = Vec3::splat(scale_factor);
 	}
 }

@@ -439,7 +439,7 @@ fn create_perspective_angled_state(size: f32) -> (Transform, PerspectiveProjecti
 	(transform, projection)
 }
 
-fn dolly_zoom_distance(width: f32, fov: f32) -> f32 {
+pub fn dolly_zoom_distance(width: f32, fov: f32) -> f32 {
 	width / (2.0 * (0.5 * fov).tan())
 }
 
