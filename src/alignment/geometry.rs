@@ -88,7 +88,13 @@ pub(crate) fn w_i(lambda_i: f32, clothoid_end_tangent_angle: f32) -> Vec3 {
 	}
 }
 
-pub(crate) fn f_i(t_i: Vec3, l_c_abs: f64, beta_i: f64, fresnel_scale: f64, fresnel_scale_sign: f64) -> Vec3 {
+pub(crate) fn f_i(
+	t_i: Vec3,
+	l_c_abs: f64,
+	beta_i: f64,
+	fresnel_scale: f64,
+	fresnel_scale_sign: f64,
+) -> Vec3 {
 	let fresnel_arg = l_c_abs / fresnel_scale;
 	let fresnel = fresnel_arg.fresnel();
 	let i_x = (fresnel_scale

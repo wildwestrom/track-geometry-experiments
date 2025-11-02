@@ -1,6 +1,6 @@
 use anyhow::Result;
 use bevy_egui::egui;
-use log::{error, debug};
+use log::{debug, error};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
