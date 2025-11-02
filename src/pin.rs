@@ -155,6 +155,8 @@ fn on_pin_drag_start(
 	pin_query: Query<&Transform, With<Pin>>,
 	mut camera_mode: ResMut<CameraMode>,
 	terrain_mesh: Single<Entity, With<TerrainMesh>>,
+	terrain_heightmap: Single<&HeightMap>,
+	settings: Res<terrain::Settings>,
 	ray_map: Res<RayMap>,
 	mut raycast: MeshRayCast,
 	mut drag_state: ResMut<PinDragState>,
@@ -166,11 +168,18 @@ fn on_pin_drag_start(
 		let pointer_id = drag_start.pointer_id;
 		let camera = drag_start.event.hit.camera;
 		let terrain_entity = *terrain_mesh;
+		let heightmap = *terrain_heightmap;
 		let mut offset = Vec3::ZERO;
 
 		if let Some(ray) = pointer_ray(&ray_map, pointer_id, camera) {
-			if let Some(point) = raycast_terrain_point(ray, terrain_entity, &mut raycast) {
-				offset = pin_transform.translation - point;
+			if let Some(raycast_point) = raycast_terrain_point(ray, terrain_entity, &mut raycast) {
+				let terrain_point = calculate_terrain_point_from_raycast(
+					raycast_point,
+					pin_transform.translation,
+					&heightmap,
+					&settings,
+				);
+				offset = pin_transform.translation - terrain_point;
 			}
 		}
 
@@ -203,6 +212,8 @@ fn on_pin_drag_end(
 fn on_pin_drag_update(
 	drag: On<Pointer<Drag>>,
 	terrain_mesh: Single<Entity, With<TerrainMesh>>,
+	terrain_heightmap: Single<&HeightMap>,
+	settings: Res<terrain::Settings>,
 	mut pin_transform_query: Query<&mut Transform, With<Pin>>,
 	ray_map: Res<RayMap>,
 	mut raycast: MeshRayCast,
@@ -215,14 +226,20 @@ fn on_pin_drag_update(
 	let Some(drag_data) = drag_state.entries.get(&drag.entity).copied() else {
 		return;
 	};
-	
+
 	if drag.pointer_id != drag_data.pointer_id {
 		return;
 	}
 
 	if let Some(ray) = pointer_ray(&ray_map, drag_data.pointer_id, drag_data.camera) {
-		if let Some(point) = raycast_terrain_point(ray, *terrain_mesh, &mut raycast) {
-			pin_transform.translation = point + drag_data.offset;
+		if let Some(raycast_point) = raycast_terrain_point(ray, *terrain_mesh, &mut raycast) {
+			let terrain_point = calculate_terrain_point_from_raycast(
+				raycast_point,
+				pin_transform.translation,
+				*terrain_heightmap,
+				&settings,
+			);
+			pin_transform.translation = terrain_point + drag_data.offset;
 		}
 	}
 }
@@ -253,6 +270,16 @@ fn pointer_ray(ray_map: &RayMap, pointer_id: PointerId, camera: Entity) -> Optio
 		.iter()
 		.find(|(ray_id, _)| ray_id.pointer == pointer_id && ray_id.camera == camera)
 		.map(|(_, ray)| *ray)
+}
+
+fn calculate_terrain_point_from_raycast(
+	raycast_point: Vec3,
+	pin_translation: Vec3,
+	heightmap: &HeightMap,
+	settings: &terrain::Settings,
+) -> Vec3 {
+	let terrain_height = calculate_terrain_height(pin_translation, heightmap, settings);
+	Vec3::new(raycast_point.x, terrain_height, raycast_point.z)
 }
 
 fn raycast_terrain_point(
