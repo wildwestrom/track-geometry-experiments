@@ -20,7 +20,9 @@ impl Plugin for PinPlugin {
 				(
 					// This is to make sure when we grab a point from the heightmap
 					// we're always indexing the array within the bounds of the heightmap.
-					move_pins_above_terrain.after(TerrainUpdateSet),
+					move_pins_above_terrain
+						.after(TerrainUpdateSet)
+						.run_if(heightmap_changed.or(new_pins_added)),
 					scale_pins_by_distance,
 				),
 			)
@@ -98,6 +100,14 @@ pub fn create_pin(
 				));
 			});
 	}
+}
+
+fn heightmap_changed(terrain_query: Query<(), (With<TerrainMesh>, Changed<HeightMap>)>) -> bool {
+	!terrain_query.is_empty()
+}
+
+fn new_pins_added(pin_query: Query<(), Added<Pin>>) -> bool {
+	!pin_query.is_empty()
 }
 
 fn move_pins_above_terrain(
