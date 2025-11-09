@@ -1060,18 +1060,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_procedural_terrain_gen"
-version = "0.0.0"
-dependencies = [
- "bevy",
- "bevy_egui",
- "bevy_panorbit_camera",
- "log",
- "noise",
- "serde",
-]
-
-[[package]]
 name = "bevy_ptr"
 version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4395,9 +4383,9 @@ dependencies = [
  "bevy",
  "bevy_egui",
  "bevy_panorbit_camera",
- "bevy_procedural_terrain_gen",
  "bevy_tweening",
  "log",
+ "noise",
  "serde",
  "serde_json",
  "spec_math",

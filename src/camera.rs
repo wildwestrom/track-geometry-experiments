@@ -4,7 +4,7 @@ use bevy_tweening::{AnimTarget, Lens, Tween, TweenAnim, TweeningPlugin};
 use std::f32::consts::PI;
 use std::time::Duration;
 
-use bevy_procedural_terrain_gen as terrain;
+use crate::terrain as terrain;
 use terrain::spatial::world_size;
 
 pub struct CameraPlugin;

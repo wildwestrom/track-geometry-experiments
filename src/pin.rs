@@ -17,7 +17,7 @@ use bevy::{
 	prelude::*,
 	render::render_resource::Face,
 };
-use bevy_procedural_terrain_gen::{self as terrain, TerrainMesh};
+use crate::terrain::{self as terrain, TerrainMesh};
 use terrain::{HeightMap, TerrainUpdateSet, calculate_terrain_height};
 
 pub struct PinPlugin;

@@ -1,7 +1,7 @@
 cargo-features = ["codegen-backend"]
 
 [workspace]
-members = [".", "bevy_procedural_terrain_gen"]
+members = ["."]
 resolver = "3"
 
 [package]
@@ -93,7 +93,6 @@ serde_json = "1.0"
 anyhow = "1.0"
 bevy_tweening = "0.14.0"
 spec_math = "0.1.6"
-bevy_procedural_terrain_gen = { path = "bevy_procedural_terrain_gen" }
 
 
 [dependencies]
@@ -104,7 +103,7 @@ log = { workspace = true }
 anyhow = { workspace = true }
 bevy_tweening = { workspace = true }
 spec_math = { workspace = true }
-bevy_procedural_terrain_gen = { workspace = true }
+noise = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

@@ -1,12 +1,10 @@
-use crate::saveable::SaveableSettings;
+use crate::terrain;
 use crate::terrain_contour::{ContourMaterial, ContourState};
 use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy_egui::{EguiContexts, egui};
-use bevy_procedural_terrain_gen as terrain;
-use log::{debug, error};
-use terrain::TerrainControlsUiExt;
+use log::debug;
 
 /// Plugin to bridge track alignment elevations into the bevy_terrain_gen visualization.
 pub struct TerrainIntegrationPlugin;
@@ -15,14 +13,9 @@ impl Plugin for TerrainIntegrationPlugin {
 	fn build(&self, app: &mut App) {
 		// Ensure the terrain plugin has a buffer to read elevation samples from.
 		app
-			.insert_resource(terrain::Settings::load_or_default())
-			.init_resource::<terrain::TerrainControlsUiExt>()
 			.init_resource::<ContourState>()
 			.add_plugins(MaterialPlugin::<ContourMaterial>::default())
-			.add_systems(
-				Startup,
-				(register_terrain_controls_ext, create_placeholder_texture),
-			)
+			.add_systems(Startup, create_placeholder_texture)
 			.add_systems(PostStartup, setup_contour_terrain_material)
 			.add_systems(bevy_egui::EguiPrimaryContextPass, contour_controls_ui)
 			.add_systems(
@@ -61,32 +54,6 @@ fn create_placeholder_texture(mut commands: Commands, mut images: ResMut<Assets<
 	let handle = images.add(placeholder_image);
 	commands.insert_resource(PlaceholderTextureResource { handle });
 	debug!("Created placeholder texture for ContourMaterial");
-}
-
-impl SaveableSettings for terrain::Settings {
-	fn filename() -> &'static str {
-		"terrain_settings.json"
-	}
-}
-
-fn terrain_controls_save_load_buttons(ui: &mut egui::Ui, settings: &mut terrain::Settings) {
-	settings.handle_save_operation_ui(ui, "Save Settings");
-
-	if ui.button("Load Settings").clicked() {
-		match terrain::Settings::load() {
-			Ok(loaded) => {
-				*settings = loaded;
-				debug!("Loaded terrain_settings.json");
-			}
-			Err(e) => {
-				error!("Failed to load terrain settings: {}", e);
-			}
-		}
-	}
-}
-
-fn register_terrain_controls_ext(mut ext: ResMut<TerrainControlsUiExt>) {
-	ext.callbacks.push(terrain_controls_save_load_buttons);
 }
 
 /// System to add contour overlay material as a child entity

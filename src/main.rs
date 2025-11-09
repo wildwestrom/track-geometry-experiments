@@ -13,14 +13,13 @@ mod camera;
 //mod hud;
 mod pin;
 mod saveable;
+mod terrain;
 mod terrain_contour;
-mod terrain_integration;
 
 use crate::alignment::AlignmentPlugin;
 use crate::camera::CameraPlugin;
 use crate::pin::PinPlugin;
-use crate::terrain_integration::TerrainIntegrationPlugin;
-use bevy_procedural_terrain_gen::TerrainPlugin;
+use crate::terrain::TerrainPlugin;
 
 fn main() {
 	App::new()
@@ -34,7 +33,6 @@ fn main() {
 		.add_plugins(EguiPlugin::default())
 		.add_plugins(CameraPlugin)
 		.add_plugins(TerrainPlugin)
-		.add_plugins(TerrainIntegrationPlugin)
 		.add_plugins(PinPlugin)
 		.add_plugins(AlignmentPlugin)
 		//.add_plugins(hud::CameraDebugHud)

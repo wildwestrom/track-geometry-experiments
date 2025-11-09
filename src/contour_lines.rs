@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_procedural_terrain_gen::{HeightMap, Settings};
+use crate::terrain::{HeightMap, Settings};
 
 /// A line segment with start and end points in 2D space
 #[derive(Debug, Clone, Copy)]

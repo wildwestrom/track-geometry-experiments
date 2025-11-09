@@ -28,7 +28,7 @@ impl Plugin for AlignmentPlugin {
 	fn build(&self, app: &mut App) {
 		app
 			.insert_resource(load_alignment())
-			.insert_resource(GeometryDebugLevel(MAX_GEOMETRY_DEBUG_LEVEL))
+			.insert_resource(GeometryDebugLevel(2))
 			.init_gizmo_group::<AlignmentGizmos>()
 			.add_systems(Startup, (state::startup, configure_gizmos))
 			.add_systems(

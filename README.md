@@ -10,6 +10,10 @@ A playground for visualizing and optimizing railway alignments using Bevy, featu
 
 This project uses Bevy (a modern ECS-based game engine) to create an interactive 3D visualization tool for railway/road track geometry. It integrates procedural terrain generation with an alignment constraint system, allowing users to interact with control points (pins) on a terrain surface while maintaining geometric constraints.
 
+### Story
+
+It all started in the summer of 2025. I was playing Transport Fever 2, but I was frustrated by the track building tools. I kept trying to find new ways to build the tracks so the curves would look nice and smooth, but I could never get them just right. It was from this frustration that I went down the rabbit hole of curves and track geometry.
+
 ## Building and Running
 
 ### Development Mode

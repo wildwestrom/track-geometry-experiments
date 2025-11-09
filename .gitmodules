@@ -1,3 +1,0 @@
-[submodule "bevy_procedural_terrain_gen"]
-	path = bevy_procedural_terrain_gen
-	url = https://github.com/wildwestrom/bevy-terrain-gen.git
