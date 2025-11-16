@@ -68,11 +68,11 @@ pub(crate) fn alpha_i(start_vector: Vec3) -> f32 {
 	start_vector.z.atan2(start_vector.x)
 }
 
-pub(crate) fn o_i(circular_section_radius_i: f32, f_i: Vec3, w_i: Vec3) -> Vec3 {
+pub(crate) fn circular_arc_center(circular_section_radius_i: f32, f_i: Vec3, w_i: Vec3) -> Vec3 {
 	f_i + circular_section_radius_i * w_i
 }
 
-pub(crate) fn w_i(lambda_i: f32, clothoid_end_tangent_angle: f32) -> Vec3 {
+pub(crate) fn w_i_vector(lambda_i: f32, clothoid_end_tangent_angle: f32) -> Vec3 {
 	if lambda_i > 0.0 {
 		Vec3::new(
 			-(clothoid_end_tangent_angle.sin()),
@@ -88,7 +88,7 @@ pub(crate) fn w_i(lambda_i: f32, clothoid_end_tangent_angle: f32) -> Vec3 {
 	}
 }
 
-pub(crate) fn f_i(
+pub(crate) fn circular_arc_start(
 	t_i: Vec3,
 	l_c_abs: f64,
 	beta_i: f64,
