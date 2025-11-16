@@ -4,6 +4,9 @@ use bevy::math::ops::atan2;
 use bevy::prelude::*;
 use spec_math::Fresnel;
 
+use super::state::Alignment;
+use crate::terrain::{self, calculate_terrain_height};
+
 // Compute azimuth of the tangent from previous point to current point
 pub(crate) fn azimuth_of_tangent(current: Vec3, previous: Vec3) -> f32 {
 	let delta_x = current.x - previous.x;
@@ -62,10 +65,6 @@ pub(crate) fn total_tangent_length(
 
 	let total_tangent_length: f32 = (tp_i + ph_i + hv_i) as f32;
 	total_tangent_length
-}
-
-pub(crate) fn alpha_i(start_vector: Vec3) -> f32 {
-	start_vector.z.atan2(start_vector.x)
 }
 
 pub(crate) fn circular_arc_center(circular_section_radius_i: f32, f_i: Vec3, w_i: Vec3) -> Vec3 {
@@ -130,4 +129,227 @@ pub(crate) fn clothoid_point(
 		* ((beta_i * fresnel_scale_sign).sin() * fresnel.c
 			+ (beta_i * fresnel_scale_sign).cos() * fresnel.s)) as f32;
 	clothoid_endpoint + Vec3::new(i_x, 0.0, i_z)
+}
+
+#[derive(Clone)]
+pub(crate) struct AlignmentGeometry {
+	pub segments: Vec<CurveSegment>,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct CurveSegment {
+	pub tangent_vertex_prev: Vec3,
+	pub tangent_vertex: Vec3,
+	pub tangent_vertex_next: Vec3,
+	pub ingoing_clothoid_start: Vec3,
+	pub ingoing_clothoid: ClothoidParameters,
+	pub circular_arc: CircularArcGeometry,
+	pub outgoing_clothoid_end: Vec3,
+	pub outgoing_clothoid: ClothoidParameters,
+	pub azimuth_of_tangent: f32,
+	pub difference_in_azimuth: f32,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ClothoidParameters {
+	pub endpoint: Vec3,
+	pub length: f64,
+	pub beta: f64,
+	pub fresnel_scale: f64,
+	pub fresnel_scale_sign: f64,
+	pub s_multiplier: f64,
+}
+
+impl ClothoidParameters {
+	pub fn point_at(&self, s: f32) -> Vec3 {
+		clothoid_point(
+			self.s_multiplier * f64::from(s),
+			self.endpoint,
+			self.length,
+			self.beta,
+			self.fresnel_scale,
+			self.fresnel_scale_sign,
+		)
+	}
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct CircularArcGeometry {
+	pub start_point: Vec3,
+	pub center: Vec3,
+	pub start_vector: Vec3,
+	pub arc_sweep: f32,
+	pub start_elevation: f32,
+	pub end_point: Vec3,
+	pub end_elevation: f32,
+}
+
+impl CircularArcGeometry {
+	pub fn point_at(&self, s: f32) -> Vec3 {
+		let sweep_angle = self.arc_sweep * s;
+		let rotation = Quat::from_axis_angle(Vec3::Y, sweep_angle);
+		let rotated_vector = rotation * self.start_vector;
+		let xz_position = self.center + rotated_vector;
+		let interpolated_y = self.start_elevation * (1.0 - s) + self.end_elevation * s;
+		Vec3::new(xz_position.x, interpolated_y, xz_position.z)
+	}
+}
+
+pub(crate) fn calculate_alignment_geometry(
+	start: Vec3,
+	end: Vec3,
+	alignment: &Alignment,
+	terrain_heightmap: &terrain::HeightMap,
+	terrain_settings: &terrain::Settings,
+) -> AlignmentGeometry {
+	let mut segments = Vec::new();
+
+	assert!(start.is_finite(), "start vertex must be finite: {start}");
+	assert!(end.is_finite(), "end vertex must be finite: {end}");
+	for (i, seg) in alignment.segments.iter().enumerate() {
+		assert!(
+			seg.tangent_vertex.is_finite(),
+			"segment {i} vertex is not finite: {}",
+			seg.tangent_vertex
+		);
+		assert!(
+			seg.circular_section_radius.is_finite(),
+			"segment {i} radius is not finite: {}",
+			seg.circular_section_radius
+		);
+		assert!(
+			seg.circular_section_angle.is_finite(),
+			"segment {i} angle is not finite: {}",
+			seg.circular_section_angle
+		);
+	}
+
+	if alignment.segments.is_empty() {
+		return AlignmentGeometry { segments };
+	}
+
+	for (i, segment) in alignment.segments.iter().enumerate() {
+		let tangent_vertex_i_minus_1 = if i == 0 {
+			start
+		} else {
+			alignment.segments[i - 1].tangent_vertex
+		};
+		let tangent_vertex_i = segment.tangent_vertex;
+		let tangent_vertex_i_plus_1 = alignment
+			.segments
+			.get(i + 1)
+			.map(|next| next.tangent_vertex)
+			.unwrap_or(end);
+
+		let circular_arc_radius_i = segment.circular_section_radius;
+		let circular_arc_angle_i = segment.circular_section_angle;
+
+		let unit_vector_i = unit_vector(tangent_vertex_i, tangent_vertex_i_minus_1);
+		let unit_vector_i_plus_1 = unit_vector(tangent_vertex_i_plus_1, tangent_vertex_i);
+
+		let azimuth_of_tangent_i = azimuth_of_tangent(tangent_vertex_i, tangent_vertex_i_minus_1);
+		let azimuth_of_tangent_i_plus_1 = azimuth_of_tangent(tangent_vertex_i_plus_1, tangent_vertex_i);
+
+		let difference_in_azimuth_i =
+			difference_in_azimuth(azimuth_of_tangent_i, azimuth_of_tangent_i_plus_1);
+		let length_of_circular_section = circular_section_length(
+			circular_arc_radius_i,
+			circular_arc_angle_i,
+			difference_in_azimuth_i,
+		);
+
+		let total_tangent_length_i = total_tangent_length(
+			circular_arc_radius_i,
+			circular_arc_angle_i,
+			difference_in_azimuth_i,
+			length_of_circular_section,
+		);
+
+		let ingoing_clothoid_start_point = tangent_vertex_i - total_tangent_length_i * unit_vector_i;
+
+		let r_i_abs = f64::from(circular_arc_radius_i.abs());
+		let l_c_abs = f64::from(length_of_circular_section.abs());
+
+		let cross_y = unit_vector_i.x.mul_add(
+			unit_vector_i_plus_1.z,
+			-(unit_vector_i.z * unit_vector_i_plus_1.x),
+		);
+		let lambda_i = if cross_y >= 0.0 { 1.0_f64 } else { -1.0_f64 };
+
+		let inner = (PI * r_i_abs * l_c_abs) / lambda_i;
+		let fresnel_scale = inner.abs().sqrt();
+		let fresnel_scale_sign = inner.signum();
+
+		let ingoing_beta = f64::from(unit_vector_i.z.atan2(unit_vector_i.x));
+		let ingoing_clothoid = ClothoidParameters {
+			endpoint: ingoing_clothoid_start_point,
+			length: l_c_abs,
+			beta: ingoing_beta,
+			fresnel_scale,
+			fresnel_scale_sign,
+			s_multiplier: 1.0,
+		};
+
+		let circular_arc_start = circular_arc_start(
+			ingoing_clothoid_start_point,
+			l_c_abs,
+			ingoing_beta,
+			fresnel_scale,
+			fresnel_scale_sign,
+		);
+		let clothoid_angle_change =
+			lambda_i as f32 * (difference_in_azimuth_i - circular_arc_angle_i) / 2.0;
+		let clothoid_end_tangent_angle = unit_vector_i.z.atan2(unit_vector_i.x) + clothoid_angle_change;
+
+		let w_i_vector = w_i_vector(lambda_i as f32, clothoid_end_tangent_angle);
+		let circular_arc_center =
+			circular_arc_center(circular_arc_radius_i, circular_arc_start, w_i_vector);
+		let start_vector = circular_arc_start - circular_arc_center;
+
+		let arc_sweep = -lambda_i.signum() as f32 * circular_arc_angle_i;
+		let arc_end_point = {
+			let start_vector_from_center = start_vector;
+			let rotation = Quat::from_axis_angle(Vec3::Y, arc_sweep);
+			let xz_pos = circular_arc_center + rotation * start_vector_from_center;
+			let y_pos = calculate_terrain_height(xz_pos, terrain_heightmap, terrain_settings);
+			Vec3::new(xz_pos.x, y_pos, xz_pos.z)
+		};
+
+		let circular_arc = CircularArcGeometry {
+			start_point: circular_arc_start,
+			center: circular_arc_center,
+			start_vector,
+			arc_sweep,
+			start_elevation: circular_arc_start.y,
+			end_point: arc_end_point,
+			end_elevation: arc_end_point.y,
+		};
+
+		let clothoid_transition_end = tangent_vertex_i + total_tangent_length_i * unit_vector_i_plus_1;
+
+		let outgoing_beta = f64::from(unit_vector_i_plus_1.z.atan2(unit_vector_i_plus_1.x));
+		let outgoing_clothoid = ClothoidParameters {
+			endpoint: clothoid_transition_end,
+			length: l_c_abs,
+			beta: outgoing_beta,
+			fresnel_scale,
+			fresnel_scale_sign: -fresnel_scale_sign,
+			s_multiplier: -1.0,
+		};
+
+		segments.push(CurveSegment {
+			tangent_vertex_prev: tangent_vertex_i_minus_1,
+			tangent_vertex: tangent_vertex_i,
+			tangent_vertex_next: tangent_vertex_i_plus_1,
+			ingoing_clothoid_start: ingoing_clothoid_start_point,
+			ingoing_clothoid,
+			circular_arc,
+			outgoing_clothoid_end: clothoid_transition_end,
+			outgoing_clothoid,
+			azimuth_of_tangent: azimuth_of_tangent_i,
+			difference_in_azimuth: difference_in_azimuth_i,
+		});
+	}
+
+	AlignmentGeometry { segments }
 }

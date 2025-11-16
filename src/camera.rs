@@ -4,8 +4,7 @@ use bevy_tweening::{AnimTarget, Lens, Tween, TweenAnim, TweeningPlugin};
 use std::f32::consts::PI;
 use std::time::Duration;
 
-use crate::terrain as terrain;
-use terrain::spatial::world_size;
+use crate::terrain;
 
 pub struct CameraPlugin;
 
@@ -29,7 +28,7 @@ impl Plugin for CameraPlugin {
 }
 
 fn setup(mut commands: Commands, settings: Res<terrain::Settings>) {
-	let world_size = world_size(&settings);
+	let world_size = terrain::spatial::world_size(&settings);
 	let (transform, perspective) = create_perspective_angled_state(world_size + 4206.9); // Just a random value to test its smooth
 
 	commands.spawn((
@@ -248,7 +247,7 @@ fn toggle_camera(
 
 		camera_mode.transition_timer = Timer::from_seconds(TOTAL_TRANSITION_TIME, TimerMode::Once);
 
-		let world_size = world_size(&settings);
+		let world_size = terrain::spatial::world_size(&settings);
 
 		match (camera_mode.current_mode, new_mode) {
 			// Perspective → Orthographic: 1-stage transition

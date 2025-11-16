@@ -451,7 +451,7 @@ fn ui_system(
 				ui.collapsing("Noise Parameters:", |ui| {
 					render_noise_config_ui(ui, settings_ptr);
 				});
-				
+
 				ui.separator();
 
 				settings_ptr.handle_save_operation_ui(ui, "Save Settings");

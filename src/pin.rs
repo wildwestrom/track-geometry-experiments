@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::camera::CameraMode;
 
+use crate::terrain::{self as terrain, TerrainMesh};
 use bevy::{
 	gltf::GltfAssetLabel,
 	math::Ray3d,
@@ -17,7 +18,6 @@ use bevy::{
 	prelude::*,
 	render::render_resource::Face,
 };
-use crate::terrain::{self as terrain, TerrainMesh};
 use terrain::{HeightMap, TerrainUpdateSet, calculate_terrain_height};
 
 pub struct PinPlugin;

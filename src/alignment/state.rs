@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::saveable::SaveableSettings;
-use crate::terrain as terrain;
+use crate::terrain;
 use terrain::spatial::world_size_for_height;
 
 pub(crate) type Turns = usize;
