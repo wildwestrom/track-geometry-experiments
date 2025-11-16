@@ -80,8 +80,7 @@ bevy = { version = "0.17.2", default-features = false, features = [
   # "dynamic_linking",
   # "bevy_dev_tools",
 ] }
-bevy_panorbit_camera = { version = "0.31.0", features = ["bevy_egui"] }
-# camera rotating breaks on 0.27.1
+bevy_panorbit_camera = { version = "0.33.0", features = ["bevy_egui"] }
 bevy_egui = "0.38.0"
 log = { version = "0.4.28", features = [
   "max_level_debug",
