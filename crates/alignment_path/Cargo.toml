@@ -1,0 +1,11 @@
+[package]
+name = "alignment_path"
+version = "0.1.0"
+edition = "2024"
+description = "Reusable horizontal alignment geometry primitives and utilities"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+glam = { workspace = true }
+serde = { workspace = true }
+spec_math = { workspace = true }

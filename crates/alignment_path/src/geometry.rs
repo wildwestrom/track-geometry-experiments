@@ -1,22 +1,24 @@
 use std::f64::consts::PI;
 
-use bevy::math::ops::atan2;
-use bevy::prelude::*;
+use glam::{Quat, Vec3};
 use spec_math::Fresnel;
 
-use super::state::Alignment;
-use crate::terrain::{self, calculate_terrain_height};
+use crate::path::Alignment;
+
+pub trait HeightSampler {
+	fn height_at(&self, position: Vec3) -> f32;
+}
 
 // Compute azimuth of the tangent from previous point to current point
-pub(crate) fn azimuth_of_tangent(current: Vec3, previous: Vec3) -> f32 {
+pub fn azimuth_of_tangent(current: Vec3, previous: Vec3) -> f32 {
 	let delta_x = current.x - previous.x;
 	let delta_z = current.z - previous.z;
-	let angle = atan2(delta_z, delta_x);
+	let angle = delta_z.atan2(delta_x);
 	-angle
 }
 
 // Compute the minimal absolute difference between two azimuths in [0, PI]
-pub(crate) fn difference_in_azimuth(azimuth_i: f32, azimuth_ip1: f32) -> f32 {
+pub fn difference_in_azimuth(azimuth_i: f32, azimuth_ip1: f32) -> f32 {
 	use std::f32::consts::PI;
 	let mut diff = azimuth_ip1 - azimuth_i;
 	if diff < 0.0 {
@@ -28,7 +30,7 @@ pub(crate) fn difference_in_azimuth(azimuth_i: f32, azimuth_ip1: f32) -> f32 {
 	diff
 }
 
-pub(crate) fn circular_section_length(
+pub fn circular_section_length(
 	circular_section_radius_i: f32,
 	circular_section_angle_i: f32,
 	difference_in_azimuth_i: f32,
@@ -36,7 +38,7 @@ pub(crate) fn circular_section_length(
 	circular_section_radius_i * (difference_in_azimuth_i - circular_section_angle_i)
 }
 
-pub(crate) fn total_tangent_length(
+pub fn total_tangent_length(
 	circular_section_radius_i: f32,
 	circular_section_angle_i: f32,
 	difference_in_azimuth_i: f32,
@@ -67,11 +69,11 @@ pub(crate) fn total_tangent_length(
 	total_tangent_length
 }
 
-pub(crate) fn circular_arc_center(circular_section_radius_i: f32, f_i: Vec3, w_i: Vec3) -> Vec3 {
+pub fn circular_arc_center(circular_section_radius_i: f32, f_i: Vec3, w_i: Vec3) -> Vec3 {
 	f_i + circular_section_radius_i * w_i
 }
 
-pub(crate) fn w_i_vector(lambda_i: f32, clothoid_end_tangent_angle: f32) -> Vec3 {
+pub fn w_i_vector(lambda_i: f32, clothoid_end_tangent_angle: f32) -> Vec3 {
 	if lambda_i > 0.0 {
 		Vec3::new(
 			-(clothoid_end_tangent_angle.sin()),
@@ -87,7 +89,7 @@ pub(crate) fn w_i_vector(lambda_i: f32, clothoid_end_tangent_angle: f32) -> Vec3
 	}
 }
 
-pub(crate) fn circular_arc_start(
+pub fn circular_arc_start(
 	t_i: Vec3,
 	l_c_abs: f64,
 	beta_i: f64,
@@ -106,11 +108,11 @@ pub(crate) fn circular_arc_start(
 	t_i + Vec3::new(i_x, 0.0, i_z)
 }
 
-pub(crate) fn unit_vector(tangent_vertex_i: Vec3, tangent_vertex_i_minus_1: Vec3) -> Vec3 {
+pub fn unit_vector(tangent_vertex_i: Vec3, tangent_vertex_i_minus_1: Vec3) -> Vec3 {
 	(tangent_vertex_i - tangent_vertex_i_minus_1).normalize()
 }
 
-pub(crate) fn clothoid_point(
+pub fn clothoid_point(
 	s: f64,
 	clothoid_endpoint: Vec3,
 	l_c_abs: f64,
@@ -132,12 +134,12 @@ pub(crate) fn clothoid_point(
 }
 
 #[derive(Clone)]
-pub(crate) struct AlignmentGeometry {
+pub struct AlignmentGeometry {
 	pub segments: Vec<CurveSegment>,
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct CurveSegment {
+pub struct CurveSegment {
 	pub tangent_vertex_prev: Vec3,
 	pub tangent_vertex: Vec3,
 	pub tangent_vertex_next: Vec3,
@@ -151,7 +153,7 @@ pub(crate) struct CurveSegment {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct ClothoidParameters {
+pub struct ClothoidParameters {
 	pub endpoint: Vec3,
 	pub length: f64,
 	pub beta: f64,
@@ -174,7 +176,7 @@ impl ClothoidParameters {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct CircularArcGeometry {
+pub struct CircularArcGeometry {
 	pub start_point: Vec3,
 	pub center: Vec3,
 	pub start_vector: Vec3,
@@ -195,12 +197,11 @@ impl CircularArcGeometry {
 	}
 }
 
-pub(crate) fn calculate_alignment_geometry(
+pub fn calculate_alignment_geometry<H: HeightSampler>(
 	start: Vec3,
 	end: Vec3,
 	alignment: &Alignment,
-	terrain_heightmap: &terrain::HeightMap,
-	terrain_settings: &terrain::Settings,
+	height_sampler: &H,
 ) -> AlignmentGeometry {
 	let mut segments = Vec::new();
 
@@ -311,7 +312,7 @@ pub(crate) fn calculate_alignment_geometry(
 			let start_vector_from_center = start_vector;
 			let rotation = Quat::from_axis_angle(Vec3::Y, arc_sweep);
 			let xz_pos = circular_arc_center + rotation * start_vector_from_center;
-			let y_pos = calculate_terrain_height(xz_pos, terrain_heightmap, terrain_settings);
+			let y_pos = height_sampler.height_at(xz_pos);
 			Vec3::new(xz_pos.x, y_pos, xz_pos.z)
 		};
 

@@ -53,6 +53,7 @@
               cargo-flamegraph
               cargo-machete
               cargo-unused-features
+              cargo-tarpaulin
               tracy-wayland
               valgrind-light
               heaptrack

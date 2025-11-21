@@ -1,14 +1,25 @@
+use alignment_path::{CurveSegment, HeightSampler, calculate_alignment_geometry};
 use bevy::color::palettes::css::*;
 use bevy::prelude::*;
 
-use crate::terrain;
+use crate::terrain::{self, calculate_terrain_height};
 
 use super::GeometryDebugLevel;
 use super::components::{AlignmentGizmos, AlignmentPoint, PointType};
-use super::geometry::{CurveSegment, calculate_alignment_geometry};
 use super::state::AlignmentState;
 
 const CURVE_RESOLUTION: u32 = 16;
+
+struct TerrainHeightSampler<'a> {
+	heightmap: &'a terrain::HeightMap,
+	settings: &'a terrain::Settings,
+}
+
+impl<'a> HeightSampler for TerrainHeightSampler<'a> {
+	fn height_at(&self, position: Vec3) -> f32 {
+		calculate_terrain_height(position, self.heightmap, self.settings)
+	}
+}
 
 pub(crate) fn render_alignment_path(
 	mut gizmos: Gizmos<AlignmentGizmos>,
@@ -26,8 +37,11 @@ pub(crate) fn render_alignment_path(
 	};
 
 	if let Some(alignment) = alignment_state.alignments.get(&alignment_state.turns) {
-		let alignment_geometry =
-			calculate_alignment_geometry(start, end, alignment, &terrain_heightmap, &terrain_settings);
+		let sampler = TerrainHeightSampler {
+			heightmap: &terrain_heightmap,
+			settings: &terrain_settings,
+		};
+		let alignment_geometry = calculate_alignment_geometry(start, end, alignment, &sampler);
 
 		let mut c_i_minus_1 = None;
 		for (index, segment) in alignment_geometry.segments.iter().enumerate() {

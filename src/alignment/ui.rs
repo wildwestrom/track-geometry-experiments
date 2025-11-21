@@ -2,9 +2,11 @@ use crate::saveable::SaveableSettings;
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 
+use alignment_path::PathSegment;
+
 use super::components::{AlignmentPoint, PointType};
 use super::constraints::compute_max_angle;
-use super::state::{AlignmentState, PathSegment};
+use super::state::AlignmentState;
 use super::{
 	FRAC_PI_180, GeometryDebugLevel, MAX_ARC_RADIUS, MAX_GEOMETRY_DEBUG_LEVEL, MAX_TURNS,
 	MIN_ARC_RADIUS,
