@@ -2,7 +2,7 @@
 
 A playground for visualizing and optimizing railway alignments using Bevy, featuring interactive terrain visualization, draggable control points, and alignment constraint enforcement.
 
-> [!WARNING]  
+> [!WARNING]
 > This project is a work in progress.
 > If something is broken I probably already know about it and I may or may not work on it.
 
@@ -43,27 +43,42 @@ cargo build --release
 cargo run --release
 ```
 
-### Key Features
+## Key Features
 
-#### Terrain Visualization
+### Terrain Visualization
 
 - Procedural terrain generation using `bevy_procedural_terrain_gen`
 - Contour line shader for height visualization (In progress)
 - Adjustable contour line settings (interval, color, thickness)
 - Terrain settings persistence (saves to `terrain_settings.json`)
 
-#### Alignment editing
+### Alignment editing
 
-- Drag and drop control points to edit the alignment
+- Drag control points to edit the alignment
 - Add and remove control points
-- Move control points along the alignment
 - Delete control points
-- Undo and redo
 - Save and load alignments
 
-#### Camera Controls
+### Camera Controls
 
 - Pan/orbit camera using `bevy_panorbit_camera`
 - Toggle between perspective and orthographic views (press `T`)
 - Smooth transitions between camera modes
 - Wireframe mode toggle (press `Space`)
+
+## Known Issues
+
+- The geometry engine can only do horizontal alignment
+- Constraints are hard-coded and they don't use real railways specifications
+- There are no units
+- The user interface needs some polish
+
+## Wishlist
+
+- Add vertical alignment
+- Use GIS data instead of procedural terrain
+- Add units to get a better idea of the scale of the rail project
+- Add other types of transition curves (Bloss, Sine Half Wave (Japanese Sine), Viennese Curve)
+- Allow the alignment spline to skip a straight specifications
+- Use real-life railway geometry specifications and constraints
+- Use the engine for optimizing construction cost and top speed
