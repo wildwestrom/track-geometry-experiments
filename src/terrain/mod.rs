@@ -14,8 +14,8 @@ use bevy_egui::{EguiContexts, egui};
 use noise::{HybridMulti, MultiFractal, NoiseFn, OpenSimplex};
 use serde::{Deserialize, Serialize};
 
-mod terrain_integration;
-use crate::{saveable::SaveableSettings, terrain::terrain_integration::TerrainIntegrationPlugin};
+mod contour_lines;
+use crate::{saveable::SaveableSettings, terrain::contour_lines::ContourLinePlugin};
 
 /// Public plugin to generate and visualize terrain. Self-contained with no external app deps.
 pub struct TerrainPlugin;
@@ -27,7 +27,7 @@ pub struct TerrainUpdateSet;
 impl Plugin for TerrainPlugin {
 	fn build(&self, app: &mut App) {
 		app
-			.add_plugins(TerrainIntegrationPlugin)
+			.add_plugins(ContourLinePlugin)
 			.insert_resource(Settings::load_or_default())
 			.add_systems(Startup, setup_terrain)
 			.add_systems(Update, update_terrain.in_set(TerrainUpdateSet))

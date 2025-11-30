@@ -14,7 +14,6 @@ mod hud;
 mod pin;
 mod saveable;
 mod terrain;
-mod terrain_contour;
 
 use crate::alignment::AlignmentPlugin;
 use crate::camera::CameraPlugin;
