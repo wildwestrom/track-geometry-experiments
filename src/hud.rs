@@ -20,7 +20,7 @@ fn setup_hud(mut commands: Commands) {
 	commands
 		.spawn(Node {
 			padding: UiRect::all(Val::Px(10.0)),
-			justify_self: JustifySelf::Start,
+			justify_self: JustifySelf::End,
 			align_self: AlignSelf::Start,
 			..default()
 		})
@@ -38,8 +38,8 @@ fn setup_hud(mut commands: Commands) {
 }
 
 fn update_hud(
-	camera_query: Single<(&Transform, &Projection), With<PanOrbitCamera>>,
 	mut hud_text: Single<&mut Text, With<HudText>>,
+	camera_query: Single<(&Transform, &Projection), With<PanOrbitCamera>>,
 	diagnostics: Res<DiagnosticsStore>,
 ) {
 	let (camera_transform, camera_projection) = *camera_query;
