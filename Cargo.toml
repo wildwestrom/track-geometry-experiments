@@ -111,6 +111,7 @@ alignment_path = { path = "crates/alignment_path" }
 # Enable a small amount of optimization in the dev profile.
 [profile.dev]
 opt-level = 1
+codegen-backend = "cranelift"
 
 # Enable a large amount of optimization in the dev profile for dependencies.
 [profile.dev.package."*"]
