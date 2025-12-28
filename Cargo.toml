@@ -74,6 +74,7 @@ bevy = { version = "0.17.3", default-features = false, features = [
 
   ### non-default-features as of 0.17.3
   "serialize",
+  "shader_format_wesl",
   ### use during development
   # "bevy_gizmos",
   # "bevy_debug_stepping",

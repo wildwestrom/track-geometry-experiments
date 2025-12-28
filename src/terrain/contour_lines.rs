@@ -1,7 +1,9 @@
 use crate::terrain;
 use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
-use bevy::render::render_resource::{AsBindGroup, Extent3d, ShaderType, TextureDimension, TextureFormat};
+use bevy::render::render_resource::{
+	AsBindGroup, Extent3d, ShaderType, TextureDimension, TextureFormat,
+};
 use bevy::shader::ShaderRef;
 use bevy_egui::{EguiContexts, egui};
 use log::debug;
@@ -83,20 +85,11 @@ fn setup_contour_terrain_material(
 		commands.entity(entity).insert(StandardMaterialApplied);
 
 		// Create a child entity with the same mesh but contour material overlay
-		if contour_state.enabled {
+		if contour_state.enabled() {
+			let mut settings = contour_state.settings.clone();
+			settings.enabled = 1; // Ensure enabled when creating material
 			let contour_material = ContourMaterial {
-				settings: ContourSettings {
-					metallic: 0.0,
-					perceptual_roughness: 0.5,
-					enabled: true as u32,
-					interval: contour_state.interval,
-					line_color: Vec3::new(
-						contour_state.line_color[0],
-						contour_state.line_color[1],
-						contour_state.line_color[2],
-					),
-					line_thickness: contour_state.thickness,
-				},
+				settings,
 				placeholder_texture: placeholder_handle.clone(),
 			};
 
@@ -119,7 +112,8 @@ fn setup_contour_terrain_material(
 	if count > 0 {
 		debug!(
 			"Set up contour overlay for {} terrain mesh(es) (enabled: {})",
-			count, contour_state.enabled
+			count,
+			contour_state.enabled()
 		);
 	}
 }
@@ -141,37 +135,37 @@ fn contour_controls_ui(mut contexts: EguiContexts, mut contour_state: ResMut<Con
 				ui.heading("Contour Lines");
 
 				// Toggle between contour material and standard material
-				// contour_state.enabled controls which material is active
-				let material_label = if contour_state.enabled {
+				// contour_state.enabled() controls which material is active
+				let material_label = if contour_state.enabled() {
 					"Showing contour lines"
 				} else {
 					"Contour lines off"
 				};
 				ui.label(material_label);
 
+				let is_enabled = contour_state.enabled();
 				if ui
-					.button(if contour_state.enabled {
+					.button(if is_enabled {
 						"(M) Turn off contour lines"
 					} else {
 						"(M) Turn on contour lines"
 					})
 					.clicked()
 				{
-					contour_state.enabled = !contour_state.enabled;
+					contour_state.set_enabled(!is_enabled);
 					contour_state.needs_update = true;
 				}
 				ui.separator();
 
-				if !contour_state.enabled {
+				if !contour_state.enabled() {
 					ui.label("Contour material is disabled. Enable it above to configure settings.");
 				} else {
 					// Color picker
 					ui.horizontal(|ui| {
 						ui.label("Line Color:");
-						if ui
-							.color_edit_button_rgb(&mut contour_state.line_color)
-							.changed()
-						{
+						let mut color_array = contour_state.line_color_array();
+						if ui.color_edit_button_rgb(&mut color_array).changed() {
+							contour_state.set_line_color_array(color_array);
 							contour_state.needs_update = true;
 						}
 					});
@@ -180,7 +174,10 @@ fn contour_controls_ui(mut contexts: EguiContexts, mut contour_state: ResMut<Con
 					ui.horizontal(|ui| {
 						ui.label("Interval:");
 						if ui
-							.add(egui::Slider::new(&mut contour_state.interval, 1.0..=200.0).suffix(" units"))
+							.add(
+								egui::Slider::new(&mut contour_state.settings.interval, 1.0..=200.0)
+									.suffix(" units"),
+							)
 							.changed()
 						{
 							contour_state.needs_update = true;
@@ -191,7 +188,10 @@ fn contour_controls_ui(mut contexts: EguiContexts, mut contour_state: ResMut<Con
 					ui.horizontal(|ui| {
 						ui.label("Thickness:");
 						if ui
-							.add(egui::Slider::new(&mut contour_state.thickness, 0.001..=0.1))
+							.add(egui::Slider::new(
+								&mut contour_state.settings.line_thickness,
+								0.1..=10.0,
+							))
 							.changed()
 						{
 							contour_state.needs_update = true;
@@ -208,22 +208,20 @@ fn update_contour_materials(
 ) {
 	// Update existing contour materials when settings change (but not when enabling/disabling)
 	// The apply_material_from_contour_state system handles material swapping and resets needs_update
-	if contour_state.needs_update && contour_state.enabled {
+	if contour_state.needs_update && contour_state.enabled() {
 		let mut count = 0;
 		for (_, material) in materials.iter_mut() {
-			material.settings.interval = contour_state.interval;
-			material.settings.line_color = Vec3::new(
-				contour_state.line_color[0],
-				contour_state.line_color[1],
-				contour_state.line_color[2],
-			);
-			material.settings.line_thickness = contour_state.thickness;
+			material.settings = contour_state.settings.clone();
+			material.settings.enabled = 1; // Ensure enabled when updating existing materials
 			count += 1;
 		}
 		if count > 0 {
 			debug!(
 				"Updated {} contour material(s). Interval: {}, Thickness: {}, Line Color: {:?}",
-				count, contour_state.interval, contour_state.thickness, contour_state.line_color
+				count,
+				contour_state.settings.interval,
+				contour_state.settings.line_thickness,
+				contour_state.settings.line_color
 			);
 		}
 	}
@@ -235,9 +233,10 @@ fn toggle_material_system(
 	mut contour_state: ResMut<ContourState>,
 ) {
 	if keyboard_input.just_pressed(KeyCode::KeyM) {
-		contour_state.enabled = !contour_state.enabled;
+		let was_enabled = contour_state.enabled();
+		contour_state.set_enabled(!was_enabled);
 		contour_state.needs_update = true;
-		debug!("Toggled contour material to: {}", contour_state.enabled);
+		debug!("Toggled contour material to: {}", !was_enabled);
 	}
 }
 
@@ -273,22 +272,13 @@ fn apply_material_from_contour_state(
 			})
 			.unwrap_or_default();
 
-		if contour_state.enabled {
+		if contour_state.enabled() {
 			// Create overlay if it doesn't exist
 			if existing_overlays.is_empty() {
+				let mut settings = contour_state.settings.clone();
+				settings.enabled = 1; // Ensure enabled when creating material
 				let contour_material = ContourMaterial {
-					settings: ContourSettings {
-						metallic: 0.0,
-						perceptual_roughness: 0.5,
-						enabled: true as u32,
-						interval: contour_state.interval,
-						line_color: Vec3::new(
-							contour_state.line_color[0],
-							contour_state.line_color[1],
-							contour_state.line_color[2],
-						),
-						line_thickness: contour_state.thickness,
-					},
+					settings,
 					placeholder_texture: placeholder_texture.handle.clone(),
 				};
 
@@ -318,7 +308,7 @@ fn apply_material_from_contour_state(
 
 	debug!(
 		"Updated contour overlay (enabled: {})",
-		contour_state.enabled
+		contour_state.enabled()
 	);
 
 	// Reset needs_update flag after applying changes
@@ -363,8 +353,8 @@ impl Default for ContourMaterial {
 				line_color: Vec3::ONE,
 				metallic: 0.0,
 				perceptual_roughness: 0.5,
-				interval: 20.0,
-				line_thickness: 0.02,
+				interval: 40.0,
+				line_thickness: 2.0,
 				enabled: false as u32,
 			},
 		}
@@ -384,20 +374,49 @@ impl Material for ContourMaterial {
 /// Resource to store contour line state
 #[derive(Resource)]
 pub struct ContourState {
-	pub enabled: bool,
-	pub interval: f32,
-	pub line_color: [f32; 3],
-	pub thickness: f32,
+	/// The single source of truth for contour settings
+	pub settings: ContourSettings,
+	/// Flag to track when settings need to be applied to materials
 	pub needs_update: bool,
+}
+
+impl ContourState {
+	/// Get enabled state as a bool (converts from u32)
+	pub fn enabled(&self) -> bool {
+		self.settings.enabled != 0
+	}
+
+	/// Set enabled state (converts bool to u32)
+	pub fn set_enabled(&mut self, enabled: bool) {
+		self.settings.enabled = enabled as u32;
+	}
+
+	/// Get line color as [f32; 3] for UI compatibility
+	pub fn line_color_array(&self) -> [f32; 3] {
+		[
+			self.settings.line_color.x,
+			self.settings.line_color.y,
+			self.settings.line_color.z,
+		]
+	}
+
+	/// Set line color from [f32; 3] (for UI compatibility)
+	pub fn set_line_color_array(&mut self, color: [f32; 3]) {
+		self.settings.line_color = Vec3::new(color[0], color[1], color[2]);
+	}
 }
 
 impl Default for ContourState {
 	fn default() -> Self {
 		Self {
-			enabled: false,
-			interval: 20.0,
-			line_color: [1.0, 1.0, 1.0],
-			thickness: 0.02,
+			settings: ContourSettings {
+				metallic: 0.0,
+				perceptual_roughness: 0.5,
+				enabled: 0,
+				interval: 40.0,
+				line_color: Vec3::new(1.0, 1.0, 1.0),
+				line_thickness: 2.,
+			},
 			needs_update: false,
 		}
 	}
