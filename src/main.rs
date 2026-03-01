@@ -14,11 +14,13 @@ mod hud;
 mod pin;
 mod saveable;
 mod terrain;
+mod ui_shell;
 
 use crate::alignment::AlignmentPlugin;
 use crate::camera::CameraPlugin;
 use crate::pin::PinPlugin;
 use crate::terrain::TerrainPlugin;
+use crate::ui_shell::UiShellPlugin;
 
 const HUD: bool = true;
 
@@ -33,6 +35,7 @@ fn main() {
 			..default()
 		}))
 		.add_plugins(EguiPlugin::default())
+		.add_plugins(UiShellPlugin)
 		.add_plugins(CameraPlugin)
 		.add_plugins(TerrainPlugin)
 		.add_plugins(PinPlugin)

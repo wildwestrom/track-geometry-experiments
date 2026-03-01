@@ -7,6 +7,7 @@ use bevy::render::render_resource::{
 use bevy::shader::ShaderRef;
 use bevy_egui::{EguiContexts, egui};
 use log::debug;
+use crate::ui_shell::{ActivePanel, UiShellState};
 
 pub struct ContourLinePlugin;
 
@@ -124,11 +125,20 @@ struct ContourMaterialApplied;
 #[derive(Component)]
 struct StandardMaterialApplied;
 
-fn contour_controls_ui(mut contexts: EguiContexts, mut contour_state: ResMut<ContourState>) {
+fn contour_controls_ui(
+	mut contexts: EguiContexts,
+	mut contour_state: ResMut<ContourState>,
+	ui_shell_state: Res<UiShellState>,
+) {
+	if ui_shell_state.active_panel != ActivePanel::ContourLines {
+		return;
+	}
+
 	if let Ok(ctx) = contexts.ctx_mut() {
 		egui::Window::new("Contour Lines")
-			.default_pos(egui::pos2(400.0, 35.0))
-			.default_open(false)
+			.fixed_pos(egui::pos2(8.0, 8.0))
+			.movable(false)
+			.resizable(false)
 			.show(ctx, |ui| {
 				ui.heading("Contour Lines");
 

@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 mod contour_lines;
 use crate::{saveable::SaveableSettings, terrain::contour_lines::ContourLinePlugin};
+use crate::ui_shell::{ActivePanel, UiShellState};
 
 /// Public plugin to generate and visualize terrain. Self-contained with no external app deps.
 pub struct TerrainPlugin;
@@ -430,6 +431,7 @@ fn ui_system(
 	mut contexts: EguiContexts,
 	mut settings: ResMut<Settings>,
 	noise_texture_res: Res<NoiseTextureResource>,
+	ui_shell_state: Res<UiShellState>,
 ) {
 	// Get the texture_id before borrowing ctx_mut
 	let texture_id = contexts.add_image(bevy_egui::EguiTextureHandle::Weak(
@@ -441,33 +443,36 @@ fn ui_system(
 		let before = settings.clone();
 		let settings_ptr = settings.bypass_change_detection();
 
-		egui::Window::new("Terrain Controls")
-			.default_pos(egui::pos2(0.0, 0.0))
-			.default_open(false)
-			.show(ctx, |ui| {
-				ui.collapsing("Terrain Configuration", |ui| {
-					render_terrain_config_ui(ui, settings_ptr);
-				});
-				ui.collapsing("Noise Parameters:", |ui| {
-					render_noise_config_ui(ui, settings_ptr);
-				});
+		if ui_shell_state.active_panel == ActivePanel::TerrainControls {
+			egui::Window::new("Terrain Controls")
+				.fixed_pos(egui::pos2(8.0, 8.0))
+				.movable(false)
+				.resizable(false)
+				.show(ctx, |ui| {
+					ui.collapsing("Terrain Configuration", |ui| {
+						render_terrain_config_ui(ui, settings_ptr);
+					});
+					ui.collapsing("Noise Parameters:", |ui| {
+						render_noise_config_ui(ui, settings_ptr);
+					});
 
-				ui.separator();
+					ui.separator();
 
-				settings_ptr.handle_save_operation_ui(ui, "Save Settings");
+					settings_ptr.handle_save_operation_ui(ui, "Save Settings");
 
-				if ui.button("Load Settings").clicked() {
-					match Settings::load() {
-						Ok(loaded) => {
-							*settings_ptr = loaded;
-							debug!("Loaded terrain_settings.json");
-						}
-						Err(e) => {
-							error!("Failed to load terrain settings: {}", e);
+					if ui.button("Load Settings").clicked() {
+						match Settings::load() {
+							Ok(loaded) => {
+								*settings_ptr = loaded;
+								debug!("Loaded terrain_settings.json");
+							}
+							Err(e) => {
+								error!("Failed to load terrain settings: {}", e);
+							}
 						}
 					}
-				}
-			});
+				});
+		}
 
 		// Only mark as changed if UI modified values
 		if *settings_ptr != before {
@@ -478,21 +483,24 @@ fn ui_system(
 		let image_height = noise_texture_res.height;
 		let aspect_ratio = image_width / image_height;
 
-		egui::Window::new("Visualizations")
-			.default_pos(egui::pos2(2000.0, 0.0))
-			.default_open(false)
-			.vscroll(true)
-			.show(ctx, |ui| {
-				let available = ui.available_size();
+		if ui_shell_state.active_panel == ActivePanel::Visualizations {
+			egui::Window::new("Visualizations")
+				.fixed_pos(egui::pos2(8.0, 8.0))
+				.movable(false)
+				.resizable(false)
+				.vscroll(true)
+				.show(ctx, |ui| {
+					let available = ui.available_size();
 
-				// Always fit by width since vertical scrolling is enabled
-				let w = available.x.max(1.0);
-				let h = w / aspect_ratio;
-				let (draw_width, draw_height) = (w, h);
+					// Always fit by width since vertical scrolling is enabled
+					let w = available.x.max(1.0);
+					let h = w / aspect_ratio;
+					let (draw_width, draw_height) = (w, h);
 
-				ui.label("Noise Texture");
-				ui.image((texture_id, egui::vec2(draw_width, draw_height)));
-			});
+					ui.label("Noise Texture");
+					ui.image((texture_id, egui::vec2(draw_width, draw_height)));
+				});
+		}
 	}
 }
 

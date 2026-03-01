@@ -1,4 +1,5 @@
 use crate::saveable::SaveableSettings;
+use crate::ui_shell::{ActivePanel, UiShellState};
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 
@@ -6,7 +7,7 @@ use alignment_path::PathSegment;
 
 use super::components::{AlignmentPoint, PointType};
 use super::constraints::compute_max_angle;
-use super::state::{AlignmentState, DraftAlignment, TrackBuildingMode};
+use super::state::AlignmentState;
 use super::{
 	FRAC_PI_180, GeometryDebugLevel, MAX_ARC_RADIUS, MAX_GEOMETRY_DEBUG_LEVEL, MAX_TURNS,
 	MIN_ARC_RADIUS,
@@ -16,44 +17,19 @@ pub(crate) fn ui(
 	mut contexts: EguiContexts,
 	mut alignment_state: ResMut<AlignmentState>,
 	mut path_debug_level: ResMut<GeometryDebugLevel>,
-	mut track_building_mode: ResMut<TrackBuildingMode>,
-	draft_alignment: Res<DraftAlignment>,
+	ui_shell_state: Res<UiShellState>,
 	alignment_pins: Query<(&Transform, &AlignmentPoint)>,
 ) {
+	if ui_shell_state.active_panel != ActivePanel::AlignmentProperties {
+		return;
+	}
+
 	let path_debug_level = &mut path_debug_level.0;
 	if let Ok(ctx) = contexts.ctx_mut() {
-		egui::Window::new("Track Building")
-			.default_pos((00.0, 0.0))
-			.title_bar(false)
-			.resizable(false)
-			.show(ctx, |ui| {
-				let button_text = if track_building_mode.active {
-					"Exit Track Building (Esc/F)"
-				} else {
-					"Build Track (F)"
-				};
-				if ui.button(button_text).clicked() {
-					track_building_mode.active = !track_building_mode.active;
-				}
-
-				// Show draft alignment status when in track building mode
-				if track_building_mode.active {
-					ui.separator();
-					if let Some(start) = draft_alignment.start {
-						ui.label(format!(
-							"Start: ({:.1}, {:.1}, {:.1})",
-							start.x, start.y, start.z
-						));
-						ui.label("Click to place end point...");
-					} else {
-						ui.label("Click on terrain to place start point");
-					}
-				}
-			});
-
 		egui::Window::new("Alignment Properties")
-			.default_pos((00.0, 35.0))
-			.default_open(false)
+			.fixed_pos(egui::pos2(8.0, 8.0))
+			.movable(false)
+			.resizable(false)
 			.show(ctx, |ui| {
 				ui.label(format!("Path Debug Level: {path_debug_level}"));
 				ui.horizontal(|ui| {
