@@ -10,6 +10,8 @@ use bevy_egui::EguiPlugin;
 
 mod alignment;
 mod camera;
+#[cfg(debug_assertions)]
+mod debug_frame_limiter;
 mod hud;
 mod pin;
 mod saveable;
@@ -18,6 +20,8 @@ mod ui_shell;
 
 use crate::alignment::AlignmentPlugin;
 use crate::camera::CameraPlugin;
+#[cfg(debug_assertions)]
+use crate::debug_frame_limiter::DebugFrameLimiterPlugin;
 use crate::pin::PinPlugin;
 use crate::terrain::TerrainPlugin;
 use crate::ui_shell::UiShellPlugin;
@@ -46,6 +50,9 @@ fn main() {
 			default_color: Color::srgb(1.0, 1.0, 1.0),
 		})
 		.add_systems(Update, toggle_wireframe_system);
+
+	#[cfg(debug_assertions)]
+	app.add_plugins(DebugFrameLimiterPlugin);
 
 	if HUD {
 		app.add_plugins(hud::CameraDebugHud);
