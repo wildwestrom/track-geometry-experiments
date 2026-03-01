@@ -32,7 +32,7 @@ just build
 just run
 ```
 
-I set several feature flags and environment variables for debugging along with the `cargo` commands. 
+I set several feature flags and environment variables for debugging along with the `cargo` commands.
 Check out `justfile` for more info.
 
 ### Release Mode

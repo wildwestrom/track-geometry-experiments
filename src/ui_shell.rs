@@ -2,9 +2,9 @@ use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 
 use crate::alignment::TrackBuildingMode;
-use crate::terrain::ContourState;
 #[cfg(debug_assertions)]
 use crate::debug_frame_limiter::DebugFrameLimiterState;
+use crate::terrain::ContourState;
 
 pub struct UiShellPlugin;
 
