@@ -77,9 +77,12 @@ pub(crate) fn update_alignment_pins(
 	alignment_state: Res<AlignmentState>,
 	existing_pins: Query<Entity, (With<AlignmentPoint>, Without<DraftAlignmentPin>)>,
 	settings: Res<terrain::Settings>,
+	track_building_mode: Res<TrackBuildingMode>,
+	draft_alignment: Res<DraftAlignment>,
 	mut last_current_alignment: Local<Option<usize>>,
 	mut last_segment_count: Local<Option<usize>>,
 	mut last_has_current_alignment: Local<Option<bool>>,
+	mut last_hide_current_alignment: Local<Option<bool>>,
 ) {
 	let current_alignment = alignment_state.current_alignment;
 	let current_alignment_data = alignment_state.alignments.get(&current_alignment);
@@ -87,19 +90,28 @@ pub(crate) fn update_alignment_pins(
 	let current_segment_count = current_alignment_data
 		.map(|alignment| alignment.segments.len())
 		.unwrap_or_default();
+	let hide_current_alignment = track_building_mode.active
+		&& draft_alignment.start.is_some()
+		&& draft_alignment.active_alignment_id.is_none();
 
 	if *last_current_alignment == Some(current_alignment)
 		&& *last_segment_count == Some(current_segment_count)
 		&& *last_has_current_alignment == Some(has_current_alignment)
+		&& *last_hide_current_alignment == Some(hide_current_alignment)
 	{
 		return;
 	}
 	*last_current_alignment = Some(current_alignment);
 	*last_segment_count = Some(current_segment_count);
 	*last_has_current_alignment = Some(has_current_alignment);
+	*last_hide_current_alignment = Some(hide_current_alignment);
 
 	for entity in existing_pins.iter() {
 		commands.entity(entity).despawn();
+	}
+
+	if hide_current_alignment {
+		return;
 	}
 
 	if let Some(alignment) = current_alignment_data {
@@ -183,9 +195,12 @@ pub(crate) fn update_alignment_from_intermediate_pins(
 pub(crate) fn update_pins_from_alignment_state(
 	alignment_state: Res<AlignmentState>,
 	drag_state: Res<PinDragState>,
-	mut alignment_pins: Query<
-		(Entity, &mut Transform, &AlignmentPoint, Option<&PickingInteraction>),
-	>,
+	mut alignment_pins: Query<(
+		Entity,
+		&mut Transform,
+		&AlignmentPoint,
+		Option<&PickingInteraction>,
+	)>,
 ) {
 	let current_id = alignment_state.current_alignment;
 	if let Some(alignment) = alignment_state.alignments.get(&current_id) {

@@ -48,20 +48,25 @@ pub(crate) fn render_alignment_path(
 		heightmap: &heightmap,
 		settings: &terrain_settings,
 	};
+	let hide_current_alignment = track_building_mode.active
+		&& draft_alignment.start.is_some()
+		&& draft_alignment.active_alignment_id.is_none();
 
-	if let Some((start, end)) = get_start_and_end_points(&alignment_state, alignment_pins)
-		&& let Some(alignment) = alignment_state
-			.alignments
-			.get(&alignment_state.current_alignment)
-	{
-		draw_alignment_geometry(
-			&mut gizmos,
-			start,
-			end,
-			alignment,
-			geometry_debug_level,
-			&sampler,
-		);
+	if !hide_current_alignment {
+		if let Some((start, end)) = get_start_and_end_points(&alignment_state, alignment_pins)
+			&& let Some(alignment) = alignment_state
+				.alignments
+				.get(&alignment_state.current_alignment)
+		{
+			draw_alignment_geometry(
+				&mut gizmos,
+				start,
+				end,
+				alignment,
+				geometry_debug_level,
+				&sampler,
+			);
+		}
 	}
 
 	if !track_building_mode.active {
