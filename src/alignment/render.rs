@@ -1,12 +1,19 @@
 use alignment_path::{CurveSegment, HeightSampler, calculate_alignment_geometry};
 use bevy::color::palettes::css::*;
+use bevy::picking::{
+	backend::ray::RayMap,
+	mesh_picking::ray_cast::{MeshRayCast, MeshRayCastSettings},
+	pointer::PointerId,
+};
 use bevy::prelude::*;
 
+use crate::camera::PrimaryCamera3d;
 use crate::terrain::{self, calculate_terrain_height};
 
 use super::GeometryDebugLevel;
 use super::components::{AlignmentGizmos, AlignmentPoint, PointType};
-use super::state::AlignmentState;
+use super::state::{AlignmentState, DraftAlignment, TrackBuildingMode, build_preview_alignment};
+use crate::terrain::{HeightMap, TerrainMesh};
 
 const CURVE_RESOLUTION: u32 = 16;
 
@@ -28,105 +35,187 @@ pub(crate) fn render_alignment_path(
 	geometry_debug_level: Res<GeometryDebugLevel>,
 	terrain_heightmap: Single<&terrain::HeightMap>,
 	terrain_settings: Res<terrain::Settings>,
+	track_building_mode: Res<TrackBuildingMode>,
+	draft_alignment: Res<DraftAlignment>,
+	terrain_mesh: Single<Entity, With<TerrainMesh>>,
+	ray_map: Res<RayMap>,
+	mut raycast: MeshRayCast,
+	camera_query: Single<Entity, With<PrimaryCamera3d>>,
 ) {
 	let geometry_debug_level = geometry_debug_level.0;
-
-	let (start, end) = match get_start_and_end_points(&alignment_state, alignment_pins) {
-		Some(value) => value,
-		None => return,
+	let heightmap = *terrain_heightmap;
+	let sampler = TerrainHeightSampler {
+		heightmap: &heightmap,
+		settings: &terrain_settings,
 	};
 
-	if let Some(alignment) = alignment_state.alignments.get(&alignment_state.current_alignment) {
-		let sampler = TerrainHeightSampler {
-			heightmap: &terrain_heightmap,
-			settings: &terrain_settings,
-		};
-		let alignment_geometry = calculate_alignment_geometry(start, end, alignment, &sampler);
+	if let Some((start, end)) = get_start_and_end_points(&alignment_state, alignment_pins)
+		&& let Some(alignment) = alignment_state
+			.alignments
+			.get(&alignment_state.current_alignment)
+	{
+		draw_alignment_geometry(
+			&mut gizmos,
+			start,
+			end,
+			alignment,
+			geometry_debug_level,
+			&sampler,
+		);
+	}
 
-		// For straight alignments (no intermediate tangent points), just draw a line
-		if alignment_geometry.segments.is_empty() && geometry_debug_level >= 1 {
-			gizmos.line(start, end, AQUA);
-			return;
+	if !track_building_mode.active {
+		return;
+	}
+
+	let Some(preview_start) = draft_alignment.start else {
+		return;
+	};
+	let Some(cursor_position) = cursor_terrain_position(
+		*camera_query,
+		*terrain_mesh,
+		heightmap,
+		&terrain_settings,
+		&ray_map,
+		&mut raycast,
+	) else {
+		return;
+	};
+
+	let mut preview_alignment = build_preview_alignment(
+		preview_start,
+		cursor_position,
+		draft_alignment.previous_tangent,
+	);
+	alignment_path::constraints::enforce_alignment_constraints(&mut preview_alignment);
+	draw_alignment_geometry(
+		&mut gizmos,
+		preview_start,
+		cursor_position,
+		&preview_alignment,
+		geometry_debug_level,
+		&sampler,
+	);
+}
+
+fn cursor_terrain_position(
+	camera_entity: Entity,
+	terrain_entity: Entity,
+	heightmap: &HeightMap,
+	terrain_settings: &terrain::Settings,
+	ray_map: &RayMap,
+	raycast: &mut MeshRayCast,
+) -> Option<Vec3> {
+	let ray = ray_map
+		.iter()
+		.find(|(ray_id, _)| ray_id.pointer == PointerId::Mouse && ray_id.camera == camera_entity)
+		.map(|(_, ray)| *ray)?;
+
+	let filter = |entity: Entity| entity == terrain_entity;
+	let raycast_settings = MeshRayCastSettings::default().with_filter(&filter);
+	let hits = raycast.cast_ray(ray, &raycast_settings);
+
+	let hit_point = hits
+		.iter()
+		.find(|(entity, _)| *entity == terrain_entity)
+		.map(|(_, hit)| hit.point)?;
+
+	let terrain_height = calculate_terrain_height(hit_point, heightmap, terrain_settings);
+	Some(Vec3::new(hit_point.x, terrain_height, hit_point.z))
+}
+
+fn draw_alignment_geometry<H: HeightSampler>(
+	gizmos: &mut Gizmos<'_, '_, AlignmentGizmos>,
+	start: Vec3,
+	end: Vec3,
+	alignment: &alignment_path::Alignment,
+	geometry_debug_level: u8,
+	sampler: &H,
+) {
+	let alignment_geometry = calculate_alignment_geometry(start, end, alignment, sampler);
+
+	// For straight alignments (no intermediate tangent points), just draw a line.
+	if alignment_geometry.segments.is_empty() && geometry_debug_level >= 1 {
+		gizmos.line(start, end, AQUA);
+		return;
+	}
+
+	let mut c_i_minus_1 = None;
+	for (index, segment) in alignment_geometry.segments.iter().enumerate() {
+		if geometry_debug_level >= 3 {
+			debug_angles(gizmos, segment);
 		}
 
-		let mut c_i_minus_1 = None;
-		for (index, segment) in alignment_geometry.segments.iter().enumerate() {
-			if geometry_debug_level >= 3 {
-				debug_angles(&mut gizmos, segment);
-			}
-
-			if geometry_debug_level >= 2 {
-				gizmos.sphere(
-					Isometry3d::from_translation(segment.ingoing_clothoid_start),
-					10.0,
-					GRAY,
-				);
-			}
-
-			let ingoing_params = segment.ingoing_clothoid;
-			let ingoing_clothoid =
-				FunctionCurve::new(Interval::UNIT, move |s| ingoing_params.point_at(s));
-			draw_ingoing_clothoid(&mut gizmos, ingoing_clothoid);
-
-			if geometry_debug_level >= 1 {
-				let arc_geometry = segment.circular_arc;
-				let arc_function = FunctionCurve::new(Interval::UNIT, move |s| arc_geometry.point_at(s));
-
-				gizmos.curve_3d(
-					arc_function,
-					(0..=CURVE_RESOLUTION).map(|i| i as f32 / CURVE_RESOLUTION as f32),
-					GREEN_YELLOW,
-				);
-			}
-
-			if geometry_debug_level >= 2 {
-				gizmos.sphere(
-					Isometry3d::from_translation(segment.circular_arc.end_point),
-					8.0,
-					YELLOW,
-				);
-				gizmos.sphere(
-					Isometry3d::from_translation(segment.circular_arc.start_point),
-					8.0,
-					YELLOW,
-				);
-				gizmos.sphere(
-					Isometry3d::from_translation(segment.outgoing_clothoid_end),
-					10.0,
-					STEEL_BLUE,
-				);
-			}
-
-			if geometry_debug_level >= 1 {
-				if let Some(previous_transition_end) = c_i_minus_1 {
-					gizmos.line(
-						previous_transition_end,
-						segment.ingoing_clothoid_start,
-						AQUA,
-					);
-				} else {
-					gizmos.line(
-						segment.tangent_vertex_prev,
-						segment.ingoing_clothoid_start,
-						AQUA,
-					);
-				}
-
-				if index == alignment_geometry.segments.len().saturating_sub(1) {
-					gizmos.line(
-						segment.outgoing_clothoid_end,
-						segment.tangent_vertex_next,
-						AQUA,
-					);
-				}
-			}
-			c_i_minus_1 = Some(segment.outgoing_clothoid_end);
-
-			let outgoing_params = segment.outgoing_clothoid;
-			let outgoing_clothoid =
-				FunctionCurve::new(Interval::UNIT, move |s| outgoing_params.point_at(s));
-			draw_outgoint_clothoid(&mut gizmos, outgoing_clothoid);
+		if geometry_debug_level >= 2 {
+			gizmos.sphere(
+				Isometry3d::from_translation(segment.ingoing_clothoid_start),
+				10.0,
+				GRAY,
+			);
 		}
+
+		let ingoing_params = segment.ingoing_clothoid;
+		let ingoing_clothoid = FunctionCurve::new(Interval::UNIT, move |s| ingoing_params.point_at(s));
+		draw_ingoing_clothoid(gizmos, ingoing_clothoid);
+
+		if geometry_debug_level >= 1 {
+			let arc_geometry = segment.circular_arc;
+			let arc_function = FunctionCurve::new(Interval::UNIT, move |s| arc_geometry.point_at(s));
+
+			gizmos.curve_3d(
+				arc_function,
+				(0..=CURVE_RESOLUTION).map(|i| i as f32 / CURVE_RESOLUTION as f32),
+				GREEN_YELLOW,
+			);
+		}
+
+		if geometry_debug_level >= 2 {
+			gizmos.sphere(
+				Isometry3d::from_translation(segment.circular_arc.end_point),
+				8.0,
+				YELLOW,
+			);
+			gizmos.sphere(
+				Isometry3d::from_translation(segment.circular_arc.start_point),
+				8.0,
+				YELLOW,
+			);
+			gizmos.sphere(
+				Isometry3d::from_translation(segment.outgoing_clothoid_end),
+				10.0,
+				STEEL_BLUE,
+			);
+		}
+
+		if geometry_debug_level >= 1 {
+			if let Some(previous_transition_end) = c_i_minus_1 {
+				gizmos.line(
+					previous_transition_end,
+					segment.ingoing_clothoid_start,
+					AQUA,
+				);
+			} else {
+				gizmos.line(
+					segment.tangent_vertex_prev,
+					segment.ingoing_clothoid_start,
+					AQUA,
+				);
+			}
+
+			if index == alignment_geometry.segments.len().saturating_sub(1) {
+				gizmos.line(
+					segment.outgoing_clothoid_end,
+					segment.tangent_vertex_next,
+					AQUA,
+				);
+			}
+		}
+		c_i_minus_1 = Some(segment.outgoing_clothoid_end);
+
+		let outgoing_params = segment.outgoing_clothoid;
+		let outgoing_clothoid =
+			FunctionCurve::new(Interval::UNIT, move |s| outgoing_params.point_at(s));
+		draw_outgoint_clothoid(gizmos, outgoing_clothoid);
 	}
 }
 

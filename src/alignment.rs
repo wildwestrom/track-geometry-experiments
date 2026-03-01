@@ -41,16 +41,16 @@ impl Plugin for AlignmentPlugin {
 			.add_systems(
 				Update,
 				(
-					constraints::enforce_alignment_constraints,
 					systems::update_alignment_from_pins,
-					systems::update_alignment_pins,
 					systems::update_alignment_from_intermediate_pins,
+					constraints::enforce_alignment_constraints,
+					systems::update_pins_from_alignment_state,
+					systems::update_alignment_pins,
 					render::render_alignment_path,
 					(
 						systems::toggle_track_building_mode,
 						systems::commit_first_segment,
 						systems::place_initial_point,
-						systems::preview_straight_segment,
 					)
 						.chain(),
 				),

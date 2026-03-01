@@ -49,8 +49,14 @@ impl Plugin for PinPlugin {
 pub struct Pin;
 
 #[derive(Default, Resource)]
-struct PinDragState {
+pub(crate) struct PinDragState {
 	entries: HashMap<Entity, PinDragData>,
+}
+
+impl PinDragState {
+	pub(crate) fn is_dragging(&self, entity: Entity) -> bool {
+		self.entries.contains_key(&entity)
+	}
 }
 
 #[derive(Clone, Copy)]

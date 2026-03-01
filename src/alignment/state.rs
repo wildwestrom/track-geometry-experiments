@@ -1,4 +1,4 @@
-use alignment_path::Alignment;
+use alignment_path::{Alignment, PathSegment};
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -20,6 +20,10 @@ pub(crate) struct TrackBuildingMode {
 pub(crate) struct DraftAlignment {
 	/// The starting point of the alignment being built
 	pub start: Option<Vec3>,
+	/// Tangent direction to preserve when chaining segments
+	pub previous_tangent: Option<Vec3>,
+	/// Alignment currently being built in chained mode
+	pub active_alignment_id: Option<AlignmentId>,
 }
 
 #[derive(Resource, Serialize, Deserialize)]
@@ -47,11 +51,87 @@ impl Default for AlignmentState {
 }
 
 impl AlignmentState {
-	/// Add a new alignment with the given ID, start/end points, and number of intermediate tangent points.
-	/// For a straight segment with no curves, use n_tangents=0.
-	pub(crate) fn add_alignment(&mut self, id: AlignmentId, start: Vec3, end: Vec3, n_tangents: usize) {
-		self.alignments.insert(id, Alignment::new(start, end, n_tangents));
+	/// Add a new alignment with the given ID, start/end points, and number of intermediate tangent
+	/// points. For a straight segment with no curves, use n_tangents=0.
+	pub(crate) fn add_alignment(
+		&mut self,
+		id: AlignmentId,
+		start: Vec3,
+		end: Vec3,
+		n_tangents: usize,
+	) {
+		self
+			.alignments
+			.insert(id, Alignment::new(start, end, n_tangents));
 	}
+}
+
+const SNAP_TO_TANGENT_DOT_THRESHOLD: f32 = 0.996_194_7; // cos(5deg)
+
+pub(crate) fn build_preview_alignment(
+	start: Vec3,
+	end: Vec3,
+	previous_tangent: Option<Vec3>,
+) -> Alignment {
+	let Some(previous_tangent) = normalize_xz(previous_tangent.unwrap_or(Vec3::ZERO)) else {
+		return Alignment::new(start, end, 0);
+	};
+	let Some(cursor_direction) = normalize_xz(end - start) else {
+		return Alignment::new(start, end, 0);
+	};
+
+	if previous_tangent.dot(cursor_direction) >= SNAP_TO_TANGENT_DOT_THRESHOLD {
+		return Alignment::new(start, end, 0);
+	}
+
+	let mut alignment = Alignment::new(start, end, 1);
+	let distance = start.distance(end);
+	let max_forward = (distance * 0.8).max(1.0);
+	let forward = (distance * 0.45).clamp(1.0, max_forward);
+	let mut tangent_vertex = start + previous_tangent * forward;
+	tangent_vertex.y = start.lerp(end, 0.45).y;
+	if let Some(segment) = alignment.segments.first_mut() {
+		segment.tangent_vertex = tangent_vertex;
+	}
+	alignment
+}
+
+pub(crate) fn alignment_end_tangent(start: Vec3, end: Vec3, alignment: &Alignment) -> Option<Vec3> {
+	let tangent = alignment
+		.segments
+		.last()
+		.map(|segment| end - segment.tangent_vertex)
+		.unwrap_or(end - start);
+	normalize_xz(tangent)
+}
+
+pub(crate) fn extend_alignment_with_preview(
+	alignment: &mut Alignment,
+	segment_start: Vec3,
+	segment_end: Vec3,
+	previous_tangent: Option<Vec3>,
+) {
+	let preview = build_preview_alignment(segment_start, segment_end, previous_tangent);
+	alignment.end = segment_end;
+
+	if let Some(preview_segment) = preview.segments.first() {
+		let mut junction_segment = PathSegment::new(segment_start);
+		junction_segment.circular_section_radius = preview_segment.circular_section_radius;
+		junction_segment.circular_section_angle = preview_segment.circular_section_angle;
+		alignment.segments.push(junction_segment);
+	}
+
+	alignment.n_tangents = alignment.segments.len();
+	alignment_path::constraints::enforce_alignment_constraints(alignment);
+}
+
+fn normalize_xz(vector: Vec3) -> Option<Vec3> {
+	let xz = Vec3::new(vector.x, 0.0, vector.z);
+	let length = xz.length();
+	if !length.is_finite() || length <= f32::EPSILON {
+		return None;
+	}
+	Some(xz / length)
 }
 
 impl SaveableSettings for AlignmentState {

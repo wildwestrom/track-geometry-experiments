@@ -64,8 +64,14 @@ pub(crate) fn ui(
 					}
 				});
 
-				ui.label(format!("Current alignment: {}", alignment_state.current_alignment));
-				ui.label(format!("Total alignments: {}", alignment_state.alignments.len()));
+				ui.label(format!(
+					"Current alignment: {}",
+					alignment_state.current_alignment
+				));
+				ui.label(format!(
+					"Total alignments: {}",
+					alignment_state.alignments.len()
+				));
 				ui.label(format!("Total pins: {}", alignment_pins.iter().count()));
 
 				let mut start_pos = Vec3::ZERO;
@@ -154,7 +160,9 @@ fn alignment_selection_ui(ui: &mut egui::Ui, alignment_state: &mut AlignmentStat
 
 fn vertex_properties_ui(ui: &mut egui::Ui, alignment_state: &mut AlignmentState) {
 	// Only show vertex properties if the alignment has intermediate tangent points
-	if let Some(alignment) = &mut alignment_state.alignments.get_mut(&alignment_state.current_alignment)
+	if let Some(alignment) = &mut alignment_state
+		.alignments
+		.get_mut(&alignment_state.current_alignment)
 		&& alignment.n_tangents > 0
 	{
 		let segments: &mut [PathSegment] = &mut alignment.segments;
