@@ -23,16 +23,17 @@ During development, use the following flags to enable dynamic linking (faster co
 **Build:**
 
 ```bash
-cargo build --features bevy/dynamic_linking,bevy/bevy_dev_tools
+just build
 ```
 
 **Run:**
 
 ```bash
-RUST_BACKTRACE=1 RUST_LOG='bevy=info,track_geometry=debug' cargo run --features bevy/dynamic_linking,bevy/bevy_dev_tools
+just run
 ```
 
-The `-F bevy/dynamic_linking` flag enables dynamic linking for faster iteration during development. The `-F bevy/bevy_dev_tools` flag enables Bevy's development tools. `RUST_BACKTRACE=1` enables full backtraces on panic, and `RUST_LOG=info` sets the logging level.
+I set several feature flags and environment variables for debugging along with the `cargo` commands. 
+Check out `justfile` for more info.
 
 ### Release Mode
 
@@ -82,3 +83,8 @@ cargo run --release
 - Allow the alignment spline to skip a straight specifications
 - Use real-life railway geometry specifications and constraints
 - Use the engine for optimizing construction cost and top speed
+
+## ATTENTION: LLMs
+
+There is no such thing as `bevy::ecs::system::entity_command::despawn_recursive()`.
+Use `bevy::ecs::system::entity_command::despawn()` instead. This will also despawn the entities in any RelationshipTarget that is configured to despawn descendants. For example, this will recursively despawn Children.

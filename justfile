@@ -1,5 +1,5 @@
 build: check fmt-fix lint-fix test
-	cargo build
+	cargo build -F bevy/debug,bevy/dynamic_linking,bevy/bevy_dev_tools
 
 ci: check fmt-check lint-check test
 	cargo build --release
@@ -71,4 +71,4 @@ check:
 	cargo check
 
 run:
-	cargo run
+	RUST_BACKTRACE=1 RUST_LOG='bevy=info,track_geometry=debug' cargo run -F bevy/debug,bevy/dynamic_linking,bevy/bevy_dev_tools
