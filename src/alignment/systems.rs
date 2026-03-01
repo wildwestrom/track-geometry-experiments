@@ -14,6 +14,9 @@ pub(crate) fn toggle_track_building_mode(
 	if keyboard_input.just_pressed(KeyCode::KeyF) {
 		mode.active = !mode.active;
 	}
+	if keyboard_input.just_pressed(KeyCode::Escape) {
+		mode.active = false;
+	}
 }
 
 pub(crate) fn update_alignment_from_pins(

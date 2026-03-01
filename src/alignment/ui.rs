@@ -27,7 +27,7 @@ pub(crate) fn ui(
 			.resizable(false)
 			.show(ctx, |ui| {
 				let button_text = if track_building_mode.active {
-					"Exit Track Building (F)"
+					"Exit Track Building (Esc/F)"
 				} else {
 					"Build Track (F)"
 				};
