@@ -46,7 +46,12 @@ fn setup(mut commands: Commands, settings: Res<terrain::Settings>) {
 			..default()
 		},
 		RenderLayers::layer(0),
-		PanOrbitCamera::default(),
+		PanOrbitCamera {
+			button_orbit: MouseButton::Right,
+			button_pan: MouseButton::Left,
+			modifier_pan: Some(KeyCode::ShiftLeft),
+			..default()
+		},
 	));
 
 	commands.spawn((
