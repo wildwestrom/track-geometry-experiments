@@ -46,10 +46,13 @@ impl Plugin for AlignmentPlugin {
 					systems::update_alignment_pins,
 					systems::update_alignment_from_intermediate_pins,
 					render::render_alignment_path,
-					systems::toggle_track_building_mode,
-					systems::commit_first_segment,
-					systems::place_initial_point,
-					systems::preview_straight_segment,
+					(
+						systems::toggle_track_building_mode,
+						systems::commit_first_segment,
+						systems::place_initial_point,
+						systems::preview_straight_segment,
+					)
+						.chain(),
 				),
 			)
 			.add_systems(bevy_egui::EguiPrimaryContextPass, ui::ui);
