@@ -68,11 +68,43 @@ impl AlignmentState {
 
 const SNAP_TO_TANGENT_DOT_THRESHOLD: f32 = 0.996_194_7; // cos(5deg)
 
+pub(crate) fn snapped_tangent_direction(
+	start: Vec3,
+	end: Vec3,
+	previous_tangent: Option<Vec3>,
+) -> Option<Vec3> {
+	let previous_tangent = normalize_xz(previous_tangent?)?;
+	let cursor_direction = normalize_xz(end - start)?;
+	if should_snap_to_previous_tangent(previous_tangent, cursor_direction) {
+		Some(previous_tangent)
+	} else {
+		None
+	}
+}
+
+pub(crate) fn snapped_segment_end(start: Vec3, end: Vec3, previous_tangent: Option<Vec3>) -> Vec3 {
+	let Some(direction) = snapped_tangent_direction(start, end, previous_tangent) else {
+		return end;
+	};
+	let to_end = Vec3::new(end.x - start.x, 0.0, end.z - start.z);
+	let forward_distance = to_end.dot(direction).max(0.0);
+	Vec3::new(
+		start.x + direction.x * forward_distance,
+		end.y,
+		start.z + direction.z * forward_distance,
+	)
+}
+
 pub(crate) fn build_preview_alignment(
 	start: Vec3,
 	end: Vec3,
 	previous_tangent: Option<Vec3>,
 ) -> Alignment {
+	let snapped_end = snapped_segment_end(start, end, previous_tangent);
+	if snapped_end.x != end.x || snapped_end.z != end.z {
+		return Alignment::new(start, snapped_end, 0);
+	}
+
 	let Some(previous_tangent) = normalize_xz(previous_tangent.unwrap_or(Vec3::ZERO)) else {
 		return Alignment::new(start, end, 0);
 	};
@@ -80,7 +112,7 @@ pub(crate) fn build_preview_alignment(
 		return Alignment::new(start, end, 0);
 	};
 
-	if previous_tangent.dot(cursor_direction) >= SNAP_TO_TANGENT_DOT_THRESHOLD {
+	if should_snap_to_previous_tangent(previous_tangent, cursor_direction) {
 		return Alignment::new(start, end, 0);
 	}
 
@@ -143,6 +175,10 @@ fn normalize_xz(vector: Vec3) -> Option<Vec3> {
 		return None;
 	}
 	Some(xz / length)
+}
+
+fn should_snap_to_previous_tangent(previous_tangent: Vec3, cursor_direction: Vec3) -> bool {
+	previous_tangent.dot(cursor_direction) >= SNAP_TO_TANGENT_DOT_THRESHOLD
 }
 
 fn configure_preview_turn_tangent_consumption(turn: Option<&mut alignment_path::TurnSegment>) {
@@ -284,6 +320,16 @@ mod tests {
 			.as_straight()
 			.expect("segment should be straight");
 		assert!((straight.fraction() - 0.6).abs() < 1.0e-4);
+	}
+
+	#[test]
+	fn snapped_segment_end_projects_endpoint_onto_previous_tangent() {
+		let start = Vec3::new(10.0, 0.0, 5.0);
+		let raw_end = Vec3::new(35.0, 0.0, 6.0);
+		let snapped_end = snapped_segment_end(start, raw_end, Some(Vec3::X));
+
+		assert!((snapped_end.z - start.z).abs() <= 1.0e-4);
+		assert!((snapped_end.x - 35.0).abs() <= 1.0e-4);
 	}
 
 	#[test]

@@ -19,7 +19,7 @@ use terrain::spatial::world_size_for_height;
 use super::components::{AlignmentPoint, PointType};
 use super::state::{
 	AlignmentState, DraftAlignment, TrackBuildingMode, alignment_end_tangent,
-	build_preview_alignment, extend_alignment_with_preview,
+	build_preview_alignment, extend_alignment_with_preview, snapped_segment_end,
 };
 
 pub(crate) fn toggle_track_building_mode(
@@ -239,6 +239,87 @@ pub(crate) fn update_pins_from_alignment_state(
 			}
 		}
 	}
+}
+
+pub(crate) fn update_draft_cursor_pin(
+	mut commands: Commands,
+	track_building_mode: Res<TrackBuildingMode>,
+	draft_alignment: Res<DraftAlignment>,
+	terrain_mesh: Single<Entity, With<TerrainMesh>>,
+	terrain_heightmap: Single<&HeightMap>,
+	settings: Res<terrain::Settings>,
+	ray_map: Res<RayMap>,
+	mut raycast: MeshRayCast,
+	camera_query: Single<Entity, With<PrimaryCamera3d>>,
+	mut draft_pins: Query<(Entity, &mut Transform, &AlignmentPoint), With<DraftAlignmentPin>>,
+) {
+	let mut cursor_pin_entity = None;
+	for (entity, _, point) in draft_pins.iter_mut() {
+		if point.alignment_id == usize::MAX && matches!(point.point_type, PointType::End) {
+			cursor_pin_entity = Some(entity);
+			break;
+		}
+	}
+
+	let should_show = track_building_mode.active && draft_alignment.start.is_some();
+	if !should_show {
+		if let Some(entity) = cursor_pin_entity {
+			commands.entity(entity).despawn();
+		}
+		return;
+	}
+
+	let camera_entity = *camera_query;
+	let terrain_entity = *terrain_mesh;
+	let heightmap = *terrain_heightmap;
+
+	let Some(ray) = ray_map
+		.iter()
+		.find(|(ray_id, _)| ray_id.pointer == PointerId::Mouse && ray_id.camera == camera_entity)
+		.map(|(_, ray)| *ray)
+	else {
+		if let Some(entity) = cursor_pin_entity {
+			commands.entity(entity).despawn();
+		}
+		return;
+	};
+
+	let filter = |entity: Entity| entity == terrain_entity;
+	let raycast_settings = MeshRayCastSettings::default().with_filter(&filter);
+	let hits = raycast.cast_ray(ray, &raycast_settings);
+	let Some(hit_point) = hits
+		.iter()
+		.find(|(entity, _)| *entity == terrain_entity)
+		.map(|(_, hit)| hit.point)
+	else {
+		if let Some(entity) = cursor_pin_entity {
+			commands.entity(entity).despawn();
+		}
+		return;
+	};
+
+	let terrain_height = calculate_terrain_height(hit_point, &heightmap, &settings);
+	let cursor_position = Vec3::new(hit_point.x, terrain_height, hit_point.z);
+
+	if let Some(entity) = cursor_pin_entity {
+		if let Ok((_, mut transform, _)) = draft_pins.get_mut(entity) {
+			transform.translation = cursor_position;
+		}
+		return;
+	}
+
+	let world_size = world_size_for_height(&settings);
+	let point = AlignmentPoint {
+		alignment_id: usize::MAX,
+		point_type: PointType::End,
+	};
+	let color = Color::srgb(0.22, 1.0, 0.08);
+	commands.queue(create_draft_pin(
+		cursor_position / world_size,
+		world_size,
+		point,
+		color,
+	));
 }
 
 /// Marker component for draft alignment pins (start point being placed)
@@ -480,7 +561,15 @@ pub(crate) fn commit_first_segment(
 
 	// Calculate proper terrain height at end point
 	let terrain_height = calculate_terrain_height(hit_point, &heightmap, &settings);
-	let end_position = Vec3::new(hit_point.x, terrain_height, hit_point.z);
+	let raw_end_position = Vec3::new(hit_point.x, terrain_height, hit_point.z);
+	let mut end_position = snapped_segment_end(
+		start_position,
+		raw_end_position,
+		draft_alignment.previous_tangent,
+	);
+	if end_position.x != raw_end_position.x || end_position.z != raw_end_position.z {
+		end_position.y = calculate_terrain_height(end_position, &heightmap, &settings);
+	}
 
 	let (current_alignment_id, committed_end_tangent) =
 		if let Some(active_alignment_id) = draft_alignment.active_alignment_id {

@@ -46,6 +46,7 @@ impl Plugin for AlignmentPlugin {
 					constraints::enforce_alignment_constraints,
 					systems::update_pins_from_alignment_state,
 					systems::update_alignment_pins,
+					systems::update_draft_cursor_pin,
 					render::render_alignment_path,
 					(
 						systems::toggle_track_building_mode,

@@ -12,10 +12,18 @@ use crate::terrain::{self, calculate_terrain_height};
 
 use super::GeometryDebugLevel;
 use super::components::{AlignmentGizmos, AlignmentPoint, PointType};
-use super::state::{AlignmentState, DraftAlignment, TrackBuildingMode, build_preview_alignment};
+use super::state::{
+	AlignmentState, DraftAlignment, TrackBuildingMode, build_preview_alignment, snapped_segment_end,
+	snapped_tangent_direction,
+};
 use crate::terrain::{HeightMap, TerrainMesh};
 
 const CURVE_RESOLUTION: u32 = 16;
+const TANGENT_RAY_DASH_LENGTH: f32 = 16.0;
+const TANGENT_RAY_GAP_LENGTH: f32 = 10.0;
+const TANGENT_RAY_EXTENT_MULTIPLIER: f32 = 12.0;
+const TANGENT_RAY_MIN_LENGTH: f32 = 8_000.0;
+const TANGENT_RAY_COLOR: Color = Color::srgba(0.22, 1.0, 0.08, 0.7);
 
 struct TerrainHeightSampler<'a> {
 	heightmap: &'a terrain::HeightMap,
@@ -86,17 +94,34 @@ pub(crate) fn render_alignment_path(
 	) else {
 		return;
 	};
-
-	let mut preview_alignment = build_preview_alignment(
+	let mut preview_end = snapped_segment_end(
 		preview_start,
 		cursor_position,
 		draft_alignment.previous_tangent,
 	);
+	if preview_end.x != cursor_position.x || preview_end.z != cursor_position.z {
+		preview_end.y = calculate_terrain_height(preview_end, heightmap, &terrain_settings);
+	}
+	if let Some(tangent_direction) = snapped_tangent_direction(
+		preview_start,
+		cursor_position,
+		draft_alignment.previous_tangent,
+	) {
+		draw_dashed_tangent_ray(
+			&mut gizmos,
+			preview_start,
+			tangent_direction,
+			terrain_settings.world_x().max(terrain_settings.world_z()),
+		);
+	}
+
+	let mut preview_alignment =
+		build_preview_alignment(preview_start, preview_end, draft_alignment.previous_tangent);
 	alignment_path::constraints::enforce_alignment_constraints(&mut preview_alignment);
 	draw_alignment_geometry(
 		&mut gizmos,
 		preview_start,
-		cursor_position,
+		preview_end,
 		&preview_alignment,
 		geometry_debug_level,
 		&sampler,
@@ -228,6 +253,23 @@ fn draw_ingoing_clothoid(
 		(0..=CURVE_RESOLUTION).map(|i| i as f32 / CURVE_RESOLUTION as f32),
 		MAGENTA,
 	);
+}
+
+fn draw_dashed_tangent_ray(
+	gizmos: &mut Gizmos<'_, '_, AlignmentGizmos>,
+	origin: Vec3,
+	direction: Vec3,
+	world_size: f32,
+) {
+	let ray_length = (world_size * TANGENT_RAY_EXTENT_MULTIPLIER).max(TANGENT_RAY_MIN_LENGTH);
+	let step = TANGENT_RAY_DASH_LENGTH + TANGENT_RAY_GAP_LENGTH;
+	let mut distance = 0.0;
+	while distance < ray_length {
+		let dash_start = origin + direction * distance;
+		let dash_end = origin + direction * (distance + TANGENT_RAY_DASH_LENGTH).min(ray_length);
+		gizmos.line(dash_start, dash_end, TANGENT_RAY_COLOR);
+		distance += step;
+	}
 }
 
 fn debug_angles(gizmos: &mut Gizmos<'_, '_, AlignmentGizmos>, segment: &CurveSegment) {
