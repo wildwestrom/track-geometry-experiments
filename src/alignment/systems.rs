@@ -19,7 +19,7 @@ use terrain::spatial::world_size_for_height;
 use super::components::{AlignmentPoint, PointType};
 use super::state::{
 	AlignmentState, DraftAlignment, TrackBuildingMode, alignment_end_tangent,
-	build_preview_alignment, extend_alignment_with_preview, snapped_segment_end,
+	build_preview_alignment, extend_alignment_with_preview, snapped_segment_end_with_lock,
 };
 
 pub(crate) fn toggle_track_building_mode(
@@ -244,7 +244,7 @@ pub(crate) fn update_pins_from_alignment_state(
 pub(crate) fn update_draft_cursor_pin(
 	mut commands: Commands,
 	track_building_mode: Res<TrackBuildingMode>,
-	draft_alignment: Res<DraftAlignment>,
+	mut draft_alignment: ResMut<DraftAlignment>,
 	terrain_mesh: Single<Entity, With<TerrainMesh>>,
 	terrain_heightmap: Single<&HeightMap>,
 	settings: Res<terrain::Settings>,
@@ -299,7 +299,23 @@ pub(crate) fn update_draft_cursor_pin(
 	};
 
 	let terrain_height = calculate_terrain_height(hit_point, &heightmap, &settings);
-	let cursor_position = Vec3::new(hit_point.x, terrain_height, hit_point.z);
+	let raw_cursor_position = Vec3::new(hit_point.x, terrain_height, hit_point.z);
+	let cursor_position = if let Some(start) = draft_alignment.start {
+		let (mut snapped, snap_active) = snapped_segment_end_with_lock(
+			start,
+			raw_cursor_position,
+			draft_alignment.previous_tangent,
+			draft_alignment.tangent_snap_locked,
+		);
+		draft_alignment.tangent_snap_locked = snap_active;
+		if snap_active && (snapped.x != raw_cursor_position.x || snapped.z != raw_cursor_position.z) {
+			snapped.y = calculate_terrain_height(snapped, &heightmap, &settings);
+		}
+		snapped
+	} else {
+		draft_alignment.tangent_snap_locked = false;
+		raw_cursor_position
+	};
 
 	if let Some(entity) = cursor_pin_entity {
 		if let Ok((_, mut transform, _)) = draft_pins.get_mut(entity) {
@@ -348,6 +364,7 @@ pub(crate) fn place_initial_point(
 		if draft_alignment.start.is_some() {
 			draft_alignment.start = None;
 			draft_alignment.previous_tangent = None;
+			draft_alignment.tangent_snap_locked = false;
 			draft_alignment.active_alignment_id = None;
 			for entity in existing_draft_pins.iter() {
 				commands.entity(entity).despawn();
@@ -406,6 +423,7 @@ pub(crate) fn place_initial_point(
 	// Store the start position in draft alignment
 	draft_alignment.start = Some(start_position);
 	draft_alignment.previous_tangent = None;
+	draft_alignment.tangent_snap_locked = false;
 	draft_alignment.active_alignment_id = None;
 
 	// Create a visual pin at the start position
@@ -562,11 +580,13 @@ pub(crate) fn commit_first_segment(
 	// Calculate proper terrain height at end point
 	let terrain_height = calculate_terrain_height(hit_point, &heightmap, &settings);
 	let raw_end_position = Vec3::new(hit_point.x, terrain_height, hit_point.z);
-	let mut end_position = snapped_segment_end(
+	let (mut end_position, snap_active) = snapped_segment_end_with_lock(
 		start_position,
 		raw_end_position,
 		draft_alignment.previous_tangent,
+		draft_alignment.tangent_snap_locked,
 	);
+	draft_alignment.tangent_snap_locked = snap_active;
 	if end_position.x != raw_end_position.x || end_position.z != raw_end_position.z {
 		end_position.y = calculate_terrain_height(end_position, &heightmap, &settings);
 	}
@@ -625,6 +645,7 @@ pub(crate) fn commit_first_segment(
 	// Continue building from the end of the committed segment.
 	draft_alignment.start = Some(end_position);
 	draft_alignment.previous_tangent = committed_end_tangent;
+	draft_alignment.tangent_snap_locked = false;
 	for entity in existing_draft_pins.iter() {
 		commands.entity(entity).despawn();
 	}

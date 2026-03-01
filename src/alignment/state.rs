@@ -22,6 +22,8 @@ pub(crate) struct DraftAlignment {
 	pub start: Option<Vec3>,
 	/// Tangent direction to preserve when chaining segments
 	pub previous_tangent: Option<Vec3>,
+	/// Whether the current in-progress segment is locked to tangent snapping.
+	pub tangent_snap_locked: bool,
 	/// Alignment currently being built in chained mode
 	pub active_alignment_id: Option<AlignmentId>,
 }
@@ -67,32 +69,48 @@ impl AlignmentState {
 }
 
 const SNAP_TO_TANGENT_DOT_THRESHOLD: f32 = 0.996_194_7; // cos(5deg)
+const SNAP_TO_TANGENT_RELEASE_DOT_THRESHOLD: f32 = 0.978_147_6; // cos(12deg)
 
-pub(crate) fn snapped_tangent_direction(
+pub(crate) fn snapped_tangent_direction_with_lock(
 	start: Vec3,
 	end: Vec3,
 	previous_tangent: Option<Vec3>,
+	snap_locked: bool,
 ) -> Option<Vec3> {
 	let previous_tangent = normalize_xz(previous_tangent?)?;
 	let cursor_direction = normalize_xz(end - start)?;
-	if should_snap_to_previous_tangent(previous_tangent, cursor_direction) {
+	if should_snap_to_previous_tangent(previous_tangent, cursor_direction, snap_locked) {
 		Some(previous_tangent)
 	} else {
 		None
 	}
 }
 
-pub(crate) fn snapped_segment_end(start: Vec3, end: Vec3, previous_tangent: Option<Vec3>) -> Vec3 {
-	let Some(direction) = snapped_tangent_direction(start, end, previous_tangent) else {
-		return end;
+pub(crate) fn snapped_segment_end_with_lock(
+	start: Vec3,
+	end: Vec3,
+	previous_tangent: Option<Vec3>,
+	snap_locked: bool,
+) -> (Vec3, bool) {
+	let Some(direction) =
+		snapped_tangent_direction_with_lock(start, end, previous_tangent, snap_locked)
+	else {
+		return (end, false);
 	};
 	let to_end = Vec3::new(end.x - start.x, 0.0, end.z - start.z);
 	let forward_distance = to_end.dot(direction).max(0.0);
-	Vec3::new(
-		start.x + direction.x * forward_distance,
-		end.y,
-		start.z + direction.z * forward_distance,
+	(
+		Vec3::new(
+			start.x + direction.x * forward_distance,
+			end.y,
+			start.z + direction.z * forward_distance,
+		),
+		true,
 	)
+}
+
+pub(crate) fn snapped_segment_end(start: Vec3, end: Vec3, previous_tangent: Option<Vec3>) -> Vec3 {
+	snapped_segment_end_with_lock(start, end, previous_tangent, false).0
 }
 
 pub(crate) fn build_preview_alignment(
@@ -112,7 +130,7 @@ pub(crate) fn build_preview_alignment(
 		return Alignment::new(start, end, 0);
 	};
 
-	if should_snap_to_previous_tangent(previous_tangent, cursor_direction) {
+	if should_snap_to_previous_tangent(previous_tangent, cursor_direction, false) {
 		return Alignment::new(start, end, 0);
 	}
 
@@ -177,8 +195,17 @@ fn normalize_xz(vector: Vec3) -> Option<Vec3> {
 	Some(xz / length)
 }
 
-fn should_snap_to_previous_tangent(previous_tangent: Vec3, cursor_direction: Vec3) -> bool {
-	previous_tangent.dot(cursor_direction) >= SNAP_TO_TANGENT_DOT_THRESHOLD
+fn should_snap_to_previous_tangent(
+	previous_tangent: Vec3,
+	cursor_direction: Vec3,
+	snap_locked: bool,
+) -> bool {
+	let threshold = if snap_locked {
+		SNAP_TO_TANGENT_RELEASE_DOT_THRESHOLD
+	} else {
+		SNAP_TO_TANGENT_DOT_THRESHOLD
+	};
+	previous_tangent.dot(cursor_direction) >= threshold
 }
 
 fn configure_preview_turn_tangent_consumption(turn: Option<&mut alignment_path::TurnSegment>) {
@@ -330,6 +357,29 @@ mod tests {
 
 		assert!((snapped_end.z - start.z).abs() <= 1.0e-4);
 		assert!((snapped_end.x - 35.0).abs() <= 1.0e-4);
+	}
+
+	#[test]
+	fn tangent_snap_lock_keeps_snap_with_small_deviation() {
+		let start = Vec3::ZERO;
+		let slightly_off_axis = Vec3::new(100.0, 0.0, 12.0);
+		let (snapped_end, snapped) =
+			snapped_segment_end_with_lock(start, slightly_off_axis, Some(Vec3::X), true);
+		assert!(snapped, "snap lock should keep tangent snap active");
+		assert!(snapped_end.z.abs() <= 1.0e-4);
+	}
+
+	#[test]
+	fn tangent_snap_lock_releases_when_deviation_is_large() {
+		let start = Vec3::ZERO;
+		let far_off_axis = Vec3::new(100.0, 0.0, 40.0);
+		let (snapped_end, snapped) =
+			snapped_segment_end_with_lock(start, far_off_axis, Some(Vec3::X), true);
+		assert!(
+			!snapped,
+			"snap lock should release when cursor moves far enough away"
+		);
+		assert_vec3_approx_eq(snapped_end, far_off_axis);
 	}
 
 	#[test]

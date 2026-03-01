@@ -13,8 +13,8 @@ use crate::terrain::{self, calculate_terrain_height};
 use super::GeometryDebugLevel;
 use super::components::{AlignmentGizmos, AlignmentPoint, PointType};
 use super::state::{
-	AlignmentState, DraftAlignment, TrackBuildingMode, build_preview_alignment, snapped_segment_end,
-	snapped_tangent_direction,
+	AlignmentState, DraftAlignment, TrackBuildingMode, build_preview_alignment,
+	snapped_segment_end_with_lock, snapped_tangent_direction_with_lock,
 };
 use crate::terrain::{HeightMap, TerrainMesh};
 
@@ -94,19 +94,22 @@ pub(crate) fn render_alignment_path(
 	) else {
 		return;
 	};
-	let mut preview_end = snapped_segment_end(
+	let (mut preview_end, snap_active) = snapped_segment_end_with_lock(
 		preview_start,
 		cursor_position,
 		draft_alignment.previous_tangent,
+		draft_alignment.tangent_snap_locked,
 	);
 	if preview_end.x != cursor_position.x || preview_end.z != cursor_position.z {
 		preview_end.y = calculate_terrain_height(preview_end, heightmap, &terrain_settings);
 	}
-	if let Some(tangent_direction) = snapped_tangent_direction(
-		preview_start,
-		cursor_position,
-		draft_alignment.previous_tangent,
-	) {
+	if snap_active
+		&& let Some(tangent_direction) = snapped_tangent_direction_with_lock(
+			preview_start,
+			cursor_position,
+			draft_alignment.previous_tangent,
+			draft_alignment.tangent_snap_locked,
+		) {
 		draw_dashed_tangent_ray(
 			&mut gizmos,
 			preview_start,
