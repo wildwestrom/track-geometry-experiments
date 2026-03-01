@@ -1,5 +1,6 @@
-use alignment_path::constraints as path_constraints;
+use alignment_path::{PathSegment, constraints as path_constraints};
 use bevy::{
+	color::palettes::css::YELLOW,
 	picking::{
 		backend::ray::RayMap,
 		hover::PickingInteraction,
@@ -150,7 +151,12 @@ pub(crate) fn update_alignment_pins(
 				alignment_id: current_alignment,
 				point_type: PointType::Intermediate { segment_index: i },
 			};
-			let point_color = alignment_point.get_color();
+			let point_color = if matches!(alignment.segments.get(i), Some(PathSegment::Straight(_)))
+			{
+				Color::Srgba(YELLOW)
+			} else {
+				alignment_point.get_color()
+			};
 			commands.queue(create_pin(
 				normalized_pos,
 				world_size,
