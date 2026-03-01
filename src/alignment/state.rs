@@ -1,4 +1,4 @@
-use alignment_path::{Alignment, PathSegment};
+use alignment_path::{Alignment, MAX_ARC_RADIUS, PathSegment};
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -91,6 +91,12 @@ pub(crate) fn build_preview_alignment(
 	let mut tangent_vertex = start + previous_tangent * forward;
 	tangent_vertex.y = start.lerp(end, 0.45).y;
 	alignment.append_turn(tangent_vertex);
+	configure_preview_turn_tangent_consumption(
+		alignment
+			.segments
+			.last_mut()
+			.and_then(PathSegment::as_turn_mut),
+	);
 	alignment
 }
 
@@ -139,9 +145,29 @@ fn normalize_xz(vector: Vec3) -> Option<Vec3> {
 	Some(xz / length)
 }
 
+fn configure_preview_turn_tangent_consumption(turn: Option<&mut alignment_path::TurnSegment>) {
+	let Some(turn) = turn else {
+		return;
+	};
+
+	// Bias preview turns toward consuming the full incoming tangent so the curve
+	// starts right after the previous straight section.
+	turn.circular_section_radius = MAX_ARC_RADIUS;
+	turn.circular_section_angle = 0.0;
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use alignment_path::{GeometrySegment, HeightSampler, calculate_alignment_geometry};
+
+	struct FlatSampler;
+
+	impl HeightSampler for FlatSampler {
+		fn height_at(&self, position: Vec3) -> f32 {
+			position.y
+		}
+	}
 
 	fn assert_vec3_approx_eq(actual: Vec3, expected: Vec3) {
 		let delta = actual.distance(expected);
@@ -286,6 +312,33 @@ mod tests {
 			second_end,
 		);
 		assert!(matches!(alignment.segments[2], PathSegment::Turn(_)));
+	}
+
+	#[test]
+	fn curve_after_snapped_straight_begins_at_last_straight_endpoint() {
+		let initial_start = Vec3::new(0.0, 0.0, 0.0);
+		let first_end = Vec3::new(10.0, 0.0, 0.0);
+		let second_end = Vec3::new(20.0, 0.0, 0.0);
+		let curve_end = Vec3::new(28.0, 0.0, 8.0);
+		let mut alignment = Alignment::new(initial_start, first_end, 0);
+
+		extend_alignment_with_preview(&mut alignment, first_end, second_end, Some(Vec3::X));
+		extend_alignment_with_preview(&mut alignment, second_end, curve_end, Some(Vec3::X));
+
+		let geometry = calculate_alignment_geometry(initial_start, curve_end, &alignment, &FlatSampler);
+		let first_curve = geometry
+			.segments
+			.iter()
+			.find_map(|segment| match segment {
+				GeometrySegment::Turn(turn) => Some(*turn),
+				GeometrySegment::Straight(_) => None,
+			})
+			.expect("alignment should contain a turn geometry segment");
+		let distance_to_last_straight_end = first_curve.ingoing_clothoid_start.distance(second_end);
+		assert!(
+			distance_to_last_straight_end <= 0.05,
+			"curve should begin at the last straight endpoint, got delta={distance_to_last_straight_end}",
+		);
 	}
 }
 
