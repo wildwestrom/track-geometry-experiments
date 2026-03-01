@@ -6,7 +6,7 @@ use alignment_path::PathSegment;
 
 use super::components::{AlignmentPoint, PointType};
 use super::constraints::compute_max_angle;
-use super::state::AlignmentState;
+use super::state::{AlignmentState, TrackBuildingMode};
 use super::{
 	FRAC_PI_180, GeometryDebugLevel, MAX_ARC_RADIUS, MAX_GEOMETRY_DEBUG_LEVEL, MAX_TURNS,
 	MIN_ARC_RADIUS,
@@ -16,10 +16,26 @@ pub(crate) fn ui(
 	mut contexts: EguiContexts,
 	mut alignment_state: ResMut<AlignmentState>,
 	mut path_debug_level: ResMut<GeometryDebugLevel>,
+	mut track_building_mode: ResMut<TrackBuildingMode>,
 	alignment_pins: Query<(&Transform, &AlignmentPoint)>,
 ) {
 	let path_debug_level = &mut path_debug_level.0;
 	if let Ok(ctx) = contexts.ctx_mut() {
+		egui::Window::new("Track Building")
+			.default_pos((00.0, 0.0))
+			.title_bar(false)
+			.resizable(false)
+			.show(ctx, |ui| {
+				let button_text = if track_building_mode.active {
+					"Exit Track Building (F)"
+				} else {
+					"Build Track (F)"
+				};
+				if ui.button(button_text).clicked() {
+					track_building_mode.active = !track_building_mode.active;
+				}
+			});
+
 		egui::Window::new("Alignment Properties")
 			.default_pos((00.0, 35.0))
 			.default_open(false)

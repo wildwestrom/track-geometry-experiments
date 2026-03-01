@@ -11,7 +11,7 @@ mod ui;
 
 pub(crate) use alignment_path::constraints::{MAX_ARC_RADIUS, MIN_ARC_RADIUS};
 pub(crate) use components::{AlignmentGizmos, configure_gizmos};
-pub(crate) use state::load_alignment;
+pub(crate) use state::{TrackBuildingMode, load_alignment};
 
 pub(crate) const MAX_TURNS: usize = 8;
 pub(crate) const FRAC_PI_180: f64 = PI / 180.;
@@ -27,6 +27,7 @@ impl Plugin for AlignmentPlugin {
 		app
 			.insert_resource(load_alignment())
 			.insert_resource(GeometryDebugLevel(2))
+			.init_resource::<TrackBuildingMode>()
 			.init_gizmo_group::<AlignmentGizmos>()
 			.add_systems(Startup, (state::startup, configure_gizmos))
 			.add_systems(
@@ -44,6 +45,7 @@ impl Plugin for AlignmentPlugin {
 					systems::update_alignment_pins,
 					systems::update_alignment_from_intermediate_pins,
 					render::render_alignment_path,
+					systems::toggle_track_building_mode,
 				),
 			)
 			.add_systems(bevy_egui::EguiPrimaryContextPass, ui::ui);

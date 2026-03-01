@@ -144,9 +144,9 @@ fn contour_controls_ui(mut contexts: EguiContexts, mut contour_state: ResMut<Con
 				let is_enabled = contour_state.enabled();
 				if ui
 					.button(if is_enabled {
-						"(M) Turn off contour lines"
+						"Turn off contour lines"
 					} else {
-						"(M) Turn on contour lines"
+						"Turn on contour lines"
 					})
 					.clicked()
 				{
@@ -211,12 +211,14 @@ fn update_contour_materials(
 	}
 }
 
-/// System to toggle contour_state.enabled via keyboard (M key)
+const CONTOUR_TOGGLE: KeyCode = KeyCode::KeyC;
+
+/// System to toggle contour_state.enabled via keyboard
 fn toggle_material_system(
 	keyboard_input: Res<ButtonInput<KeyCode>>,
 	mut contour_state: ResMut<ContourState>,
 ) {
-	if keyboard_input.just_pressed(KeyCode::KeyM) {
+	if keyboard_input.just_pressed(CONTOUR_TOGGLE) {
 		let was_enabled = contour_state.enabled();
 		contour_state.set_enabled(!was_enabled);
 		debug!("Toggled contour material to: {}", !was_enabled);

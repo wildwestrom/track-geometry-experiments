@@ -55,7 +55,7 @@ fn toggle_wireframe_system(
 	keyboard_input: Res<ButtonInput<KeyCode>>,
 	mut config: ResMut<WireframeConfig>,
 ) {
-	if keyboard_input.just_pressed(KeyCode::Space) {
+	if keyboard_input.just_pressed(KeyCode::KeyW) {
 		config.global = !config.global;
 		debug!(
 			"Wireframe mode: {}",

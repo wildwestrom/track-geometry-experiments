@@ -5,7 +5,16 @@ use crate::terrain;
 use terrain::spatial::world_size_for_height;
 
 use super::components::{AlignmentPoint, PointType};
-use super::state::AlignmentState;
+use super::state::{AlignmentState, TrackBuildingMode};
+
+pub(crate) fn toggle_track_building_mode(
+	keyboard_input: Res<ButtonInput<KeyCode>>,
+	mut mode: ResMut<TrackBuildingMode>,
+) {
+	if keyboard_input.just_pressed(KeyCode::KeyF) {
+		mode.active = !mode.active;
+	}
+}
 
 pub(crate) fn update_alignment_from_pins(
 	alignment_pins: Query<(&Transform, &AlignmentPoint), Changed<Transform>>,

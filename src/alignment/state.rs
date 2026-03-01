@@ -9,6 +9,11 @@ use terrain::spatial::world_size_for_height;
 
 pub(crate) type Turns = usize;
 
+#[derive(Resource, Default)]
+pub(crate) struct TrackBuildingMode {
+	pub active: bool,
+}
+
 #[derive(Resource, Serialize, Deserialize)]
 pub(crate) struct AlignmentState {
 	pub turns: Turns,
