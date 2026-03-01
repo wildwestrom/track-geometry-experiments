@@ -36,12 +36,18 @@ pub(crate) fn render_alignment_path(
 		None => return,
 	};
 
-	if let Some(alignment) = alignment_state.alignments.get(&alignment_state.turns) {
+	if let Some(alignment) = alignment_state.alignments.get(&alignment_state.current_alignment) {
 		let sampler = TerrainHeightSampler {
 			heightmap: &terrain_heightmap,
 			settings: &terrain_settings,
 		};
 		let alignment_geometry = calculate_alignment_geometry(start, end, alignment, &sampler);
+
+		// For straight alignments (no intermediate tangent points), just draw a line
+		if alignment_geometry.segments.is_empty() && geometry_debug_level >= 1 {
+			gizmos.line(start, end, AQUA);
+			return;
+		}
 
 		let mut c_i_minus_1 = None;
 		for (index, segment) in alignment_geometry.segments.iter().enumerate() {
@@ -178,7 +184,7 @@ fn get_start_and_end_points(
 	let mut start = None;
 	let mut end = None;
 	for (transform, alignment_point) in alignment_pins.iter() {
-		if alignment_point.alignment_id == alignment_state.turns {
+		if alignment_point.alignment_id == alignment_state.current_alignment {
 			match alignment_point.point_type {
 				PointType::Start => start = Some(transform.translation),
 				PointType::End => end = Some(transform.translation),

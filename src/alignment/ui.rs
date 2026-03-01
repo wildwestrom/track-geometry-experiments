@@ -64,14 +64,15 @@ pub(crate) fn ui(
 					}
 				});
 
-				ui.label(format!("Total turns: {}", alignment_state.turns));
+				ui.label(format!("Current alignment: {}", alignment_state.current_alignment));
+				ui.label(format!("Total alignments: {}", alignment_state.alignments.len()));
 				ui.label(format!("Total pins: {}", alignment_pins.iter().count()));
 
 				let mut start_pos = Vec3::ZERO;
 				let mut end_pos = Vec3::ZERO;
 
 				for (transform, alignment_point) in alignment_pins.iter() {
-					if alignment_point.alignment_id == alignment_state.turns {
+					if alignment_point.alignment_id == alignment_state.current_alignment {
 						match alignment_point.point_type {
 							PointType::Start => {
 								start_pos = transform.translation;
@@ -116,32 +117,45 @@ fn display_position(ui: &mut egui::Ui, label: &str, position: Vec3) {
 }
 
 fn alignment_selection_ui(ui: &mut egui::Ui, alignment_state: &mut AlignmentState) {
-	let mut alignment_keys: Vec<&usize> = alignment_state.alignments.keys().collect();
-	alignment_keys.sort();
+	let mut alignment_entries: Vec<_> = alignment_state.alignments.iter().collect();
+	alignment_entries.sort_by_key(|(id, _)| *id);
 
-	for &turns in alignment_keys {
-		let mut turns_str = turns.to_string();
-		ui.radio_value(
-			&mut alignment_state.turns,
-			turns,
-			match turns {
-				0 => "Linear Alignment",
-				1 => {
-					turns_str.push_str(" Turn");
-					&turns_str
-				}
-				_ => {
-					turns_str.push_str(" Turns");
-					&turns_str
-				}
-			},
-		);
+	let mut id_to_delete: Option<usize> = None;
+
+	for (&id, alignment) in alignment_entries {
+		let n_tangents = alignment.n_tangents;
+		let label = match n_tangents {
+			0 => format!("Alignment {} (Straight)", id),
+			1 => format!("Alignment {} (1 Turn)", id),
+			n => format!("Alignment {} ({} Turns)", id, n),
+		};
+		ui.horizontal(|ui| {
+			ui.radio_value(&mut alignment_state.current_alignment, id, label);
+			if ui.small_button("X").clicked() {
+				id_to_delete = Some(id);
+			}
+		});
+	}
+
+	// Delete alignment if requested
+	if let Some(id) = id_to_delete {
+		alignment_state.alignments.remove(&id);
+		// If we deleted the current alignment, switch to another one
+		if alignment_state.current_alignment == id {
+			alignment_state.current_alignment = alignment_state
+				.alignments
+				.keys()
+				.next()
+				.copied()
+				.unwrap_or(0);
+		}
 	}
 }
 
 fn vertex_properties_ui(ui: &mut egui::Ui, alignment_state: &mut AlignmentState) {
-	if alignment_state.turns > 0
-		&& let Some(alignment) = &mut alignment_state.alignments.get_mut(&alignment_state.turns)
+	// Only show vertex properties if the alignment has intermediate tangent points
+	if let Some(alignment) = &mut alignment_state.alignments.get_mut(&alignment_state.current_alignment)
+		&& alignment.n_tangents > 0
 	{
 		let segments: &mut [PathSegment] = &mut alignment.segments;
 		// Precompute neighbor positions to avoid borrowing conflicts
@@ -206,31 +220,31 @@ fn alignment_creation_ui(
 	ui.horizontal(|ui| {
 		ui.label("Turns:");
 
-		let mut draft_turns = alignment_state.draft_turns;
+		let mut n_turns = alignment_state.ui_new_alignment_turns;
 
 		if ui
-			.add_enabled(draft_turns > 1, egui::Button::new("-"))
+			.add_enabled(n_turns > 1, egui::Button::new("-"))
 			.clicked()
 		{
-			draft_turns = (draft_turns - 1).max(1);
+			n_turns = (n_turns - 1).max(1);
 		}
 
-		ui.label(format!("{draft_turns}"));
+		ui.label(format!("{n_turns}"));
 
 		if ui
-			.add_enabled(draft_turns < MAX_TURNS, egui::Button::new("+"))
+			.add_enabled(n_turns < MAX_TURNS, egui::Button::new("+"))
 			.clicked()
 		{
-			draft_turns += 1;
+			n_turns += 1;
 		}
 
-		alignment_state.draft_turns = draft_turns;
+		alignment_state.ui_new_alignment_turns = n_turns;
 
-		if !alignment_state.alignments.contains_key(&draft_turns)
-			&& ui.button("Add Alignment").clicked()
-		{
-			alignment_state.add_alignment(draft_turns, start_pos, end_pos);
-			alignment_state.turns = draft_turns;
+		if ui.button("Add Alignment").clicked() {
+			let new_id = alignment_state.next_alignment_id;
+			alignment_state.add_alignment(new_id, start_pos, end_pos, n_turns);
+			alignment_state.next_alignment_id += 1;
+			alignment_state.current_alignment = new_id;
 		}
 	});
 }

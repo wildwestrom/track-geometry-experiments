@@ -7,7 +7,7 @@ use crate::saveable::SaveableSettings;
 use crate::terrain;
 use terrain::spatial::world_size_for_height;
 
-pub(crate) type Turns = usize;
+pub(crate) type AlignmentId = usize;
 
 #[derive(Resource, Default)]
 pub(crate) struct TrackBuildingMode {
@@ -24,27 +24,33 @@ pub(crate) struct DraftAlignment {
 
 #[derive(Resource, Serialize, Deserialize)]
 pub(crate) struct AlignmentState {
-	pub turns: Turns,
-	pub alignments: HashMap<Turns, Alignment>,
+	/// The currently selected/visible alignment
+	pub current_alignment: AlignmentId,
+	pub alignments: HashMap<AlignmentId, Alignment>,
+	/// Counter for generating unique alignment IDs
 	#[serde(skip)]
-	pub draft_turns: Turns,
+	pub next_alignment_id: AlignmentId,
+	/// Number of turns for manually creating alignments via UI (separate from ID)
+	#[serde(skip)]
+	pub ui_new_alignment_turns: usize,
 }
 
 impl Default for AlignmentState {
 	fn default() -> Self {
 		Self {
-			turns: 0,
+			current_alignment: 0,
 			alignments: HashMap::new(),
-			draft_turns: 1,
+			next_alignment_id: 1,
+			ui_new_alignment_turns: 1,
 		}
 	}
 }
 
 impl AlignmentState {
-	pub(crate) fn add_alignment(&mut self, turns: usize, start: Vec3, end: Vec3) {
-		self
-			.alignments
-			.insert(turns, Alignment::new(start, end, turns));
+	/// Add a new alignment with the given ID, start/end points, and number of intermediate tangent points.
+	/// For a straight segment with no curves, use n_tangents=0.
+	pub(crate) fn add_alignment(&mut self, id: AlignmentId, start: Vec3, end: Vec3, n_tangents: usize) {
+		self.alignments.insert(id, Alignment::new(start, end, n_tangents));
 	}
 }
 
@@ -56,7 +62,10 @@ impl SaveableSettings for AlignmentState {
 
 pub(crate) fn load_alignment() -> AlignmentState {
 	let mut settings = AlignmentState::load_or_default();
-	settings.draft_turns = settings.draft_turns.max(1);
+	// Ensure next_alignment_id is at least 1 (0 is reserved for the default alignment)
+	settings.next_alignment_id = settings.next_alignment_id.max(1);
+	// Initialize skipped fields
+	settings.ui_new_alignment_turns = 1;
 	settings
 }
 
@@ -74,8 +83,8 @@ pub(crate) fn startup(
 	}
 	if !alignment_state
 		.alignments
-		.contains_key(&alignment_state.turns)
+		.contains_key(&alignment_state.current_alignment)
 	{
-		alignment_state.turns = 0;
+		alignment_state.current_alignment = 0;
 	}
 }

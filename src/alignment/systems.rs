@@ -1,4 +1,5 @@
 use bevy::{
+	color::palettes::css::ORANGE,
 	picking::{
 		backend::ray::RayMap,
 		mesh_picking::ray_cast::{MeshRayCast, MeshRayCastSettings},
@@ -13,7 +14,7 @@ use crate::pin::create_pin;
 use crate::terrain::{self, HeightMap, TerrainMesh, calculate_terrain_height};
 use terrain::spatial::world_size_for_height;
 
-use super::components::{AlignmentPoint, PointType};
+use super::components::{AlignmentGizmos, AlignmentPoint, PointType};
 use super::state::{AlignmentState, DraftAlignment, TrackBuildingMode};
 
 pub(crate) fn toggle_track_building_mode(
@@ -32,11 +33,12 @@ pub(crate) fn update_alignment_from_pins(
 	alignment_pins: Query<(&Transform, &AlignmentPoint), Changed<Transform>>,
 	mut alignment_state: ResMut<AlignmentState>,
 ) {
+	let current_id = alignment_state.current_alignment;
 	let mut start_pos = None;
 	let mut end_pos = None;
 
 	for (transform, alignment_point) in alignment_pins.iter() {
-		if alignment_point.alignment_id == alignment_state.turns {
+		if alignment_point.alignment_id == current_id {
 			match alignment_point.point_type {
 				PointType::Start => start_pos = Some(transform.translation),
 				PointType::End => end_pos = Some(transform.translation),
@@ -49,7 +51,8 @@ pub(crate) fn update_alignment_from_pins(
 		return;
 	};
 
-	for alignment in alignment_state.alignments.values_mut() {
+	// Only update the current alignment, not all alignments
+	if let Some(alignment) = alignment_state.alignments.get_mut(&current_id) {
 		if alignment.start != new_start || alignment.end != new_end {
 			alignment.start = new_start;
 			alignment.end = new_end;
@@ -64,7 +67,7 @@ pub(crate) fn update_alignment_pins(
 	settings: Res<terrain::Settings>,
 	mut last_current_alignment: Local<Option<usize>>,
 ) {
-	let current_alignment = alignment_state.turns;
+	let current_alignment = alignment_state.current_alignment;
 	if *last_current_alignment == Some(current_alignment) {
 		return;
 	}
@@ -140,10 +143,11 @@ pub(crate) fn update_pins_from_alignment_state(
 	alignment_state: Res<AlignmentState>,
 	mut alignment_pins: Query<(&mut Transform, &AlignmentPoint)>,
 ) {
-	if let Some(alignment) = alignment_state.alignments.values().next() {
+	let current_id = alignment_state.current_alignment;
+	if let Some(alignment) = alignment_state.alignments.get(&current_id) {
 		if alignment.start != Vec3::ZERO || alignment.end != Vec3::ZERO {
 			for (mut transform, alignment_point) in &mut alignment_pins {
-				if alignment_point.alignment_id == alignment_state.turns {
+				if alignment_point.alignment_id == current_id {
 					match alignment_point.point_type {
 						PointType::Start => {
 							transform.translation = alignment.start;
@@ -326,4 +330,146 @@ fn create_draft_pin(
 				));
 			});
 	}
+}
+
+/// System that handles clicking to commit the first segment.
+/// Only active when track building mode is enabled and a start point has been placed.
+pub(crate) fn commit_first_segment(
+	mut commands: Commands,
+	mouse_button: Res<ButtonInput<MouseButton>>,
+	mut track_building_mode: ResMut<TrackBuildingMode>,
+	mut draft_alignment: ResMut<DraftAlignment>,
+	mut alignment_state: ResMut<AlignmentState>,
+	terrain_mesh: Single<Entity, With<TerrainMesh>>,
+	terrain_heightmap: Single<&HeightMap>,
+	settings: Res<terrain::Settings>,
+	ray_map: Res<RayMap>,
+	mut raycast: MeshRayCast,
+	camera_query: Single<Entity, With<PrimaryCamera3d>>,
+	mut egui_contexts: bevy_egui::EguiContexts,
+	existing_draft_pins: Query<Entity, With<DraftAlignmentPin>>,
+) {
+	// Only handle when in track building mode with a start point placed
+	if !track_building_mode.active {
+		return;
+	}
+
+	let Some(start_position) = draft_alignment.start else {
+		return;
+	};
+
+	// Check for left mouse button click
+	if !mouse_button.just_pressed(MouseButton::Left) {
+		return;
+	}
+
+	// Don't commit when clicking on egui UI
+	if let Ok(ctx) = egui_contexts.ctx_mut() {
+		if ctx.wants_pointer_input() || ctx.is_pointer_over_area() {
+			return;
+		}
+	}
+
+	let camera_entity = *camera_query;
+	let terrain_entity = *terrain_mesh;
+	let heightmap = *terrain_heightmap;
+
+	// Find the ray for the mouse pointer
+	let Some(ray) = ray_map
+		.iter()
+		.find(|(ray_id, _)| ray_id.pointer == PointerId::Mouse && ray_id.camera == camera_entity)
+		.map(|(_, ray)| *ray)
+	else {
+		return;
+	};
+
+	// Raycast to terrain
+	let filter = |entity: Entity| entity == terrain_entity;
+	let raycast_settings = MeshRayCastSettings::default().with_filter(&filter);
+	let hits = raycast.cast_ray(ray, &raycast_settings);
+
+	let Some(hit_point) = hits
+		.iter()
+		.find(|(entity, _)| *entity == terrain_entity)
+		.map(|(_, hit)| hit.point)
+	else {
+		return;
+	};
+
+	// Calculate proper terrain height at end point
+	let terrain_height = calculate_terrain_height(hit_point, &heightmap, &settings);
+	let end_position = Vec3::new(hit_point.x, terrain_height, hit_point.z);
+
+	// Create the new alignment as a straight segment (n_tangents=0)
+	let new_alignment_id = alignment_state.next_alignment_id;
+	alignment_state.add_alignment(new_alignment_id, start_position, end_position, 0);
+	alignment_state.next_alignment_id += 1;
+
+	// Switch to viewing the new alignment
+	alignment_state.current_alignment = new_alignment_id;
+
+	// Clean up draft state
+	draft_alignment.start = None;
+	for entity in existing_draft_pins.iter() {
+		commands.entity(entity).despawn();
+	}
+
+	// Exit track building mode
+	track_building_mode.active = false;
+}
+
+/// System that renders a preview line from the draft alignment start point to the cursor position.
+/// Only active when track building mode is enabled and a start point has been placed.
+pub(crate) fn preview_straight_segment(
+	mut gizmos: Gizmos<AlignmentGizmos>,
+	track_building_mode: Res<TrackBuildingMode>,
+	draft_alignment: Res<DraftAlignment>,
+	terrain_mesh: Single<Entity, With<TerrainMesh>>,
+	terrain_heightmap: Single<&HeightMap>,
+	settings: Res<terrain::Settings>,
+	ray_map: Res<RayMap>,
+	mut raycast: MeshRayCast,
+	camera_query: Single<Entity, With<PrimaryCamera3d>>,
+) {
+	// Only render preview when in track building mode with a start point placed
+	if !track_building_mode.active {
+		return;
+	}
+
+	let Some(start_position) = draft_alignment.start else {
+		return;
+	};
+
+	let camera_entity = *camera_query;
+	let terrain_entity = *terrain_mesh;
+	let heightmap = *terrain_heightmap;
+
+	// Find the ray for the mouse pointer
+	let Some(ray) = ray_map
+		.iter()
+		.find(|(ray_id, _)| ray_id.pointer == PointerId::Mouse && ray_id.camera == camera_entity)
+		.map(|(_, ray)| *ray)
+	else {
+		return;
+	};
+
+	// Raycast to terrain
+	let filter = |entity: Entity| entity == terrain_entity;
+	let raycast_settings = MeshRayCastSettings::default().with_filter(&filter);
+	let hits = raycast.cast_ray(ray, &raycast_settings);
+
+	let Some(hit_point) = hits
+		.iter()
+		.find(|(entity, _)| *entity == terrain_entity)
+		.map(|(_, hit)| hit.point)
+	else {
+		return;
+	};
+
+	// Calculate proper terrain height at cursor position
+	let terrain_height = calculate_terrain_height(hit_point, &heightmap, &settings);
+	let cursor_position = Vec3::new(hit_point.x, terrain_height, hit_point.z);
+
+	// Draw preview line from start to cursor
+	gizmos.line(start_position, cursor_position, ORANGE);
 }
