@@ -1,11 +1,19 @@
-use bevy::prelude::*;
+use bevy::{
+	picking::{
+		backend::ray::RayMap,
+		mesh_picking::ray_cast::{MeshRayCast, MeshRayCastSettings},
+		pointer::PointerId,
+	},
+	prelude::*,
+};
+use bevy_panorbit_camera::PanOrbitCamera;
 
 use crate::pin::create_pin;
-use crate::terrain;
+use crate::terrain::{self, HeightMap, TerrainMesh, calculate_terrain_height};
 use terrain::spatial::world_size_for_height;
 
 use super::components::{AlignmentPoint, PointType};
-use super::state::{AlignmentState, TrackBuildingMode};
+use super::state::{AlignmentState, DraftAlignment, TrackBuildingMode};
 
 pub(crate) fn toggle_track_building_mode(
 	keyboard_input: Res<ButtonInput<KeyCode>>,
@@ -147,5 +155,187 @@ pub(crate) fn update_pins_from_alignment_state(
 				}
 			}
 		}
+	}
+}
+
+/// Marker component for draft alignment pins (start point being placed)
+#[derive(Component)]
+pub(crate) struct DraftAlignmentPin;
+
+/// System that handles clicking on terrain to place the initial point of a track segment.
+/// Only active when track building mode is enabled and no draft alignment start point exists.
+pub(crate) fn place_initial_point(
+	mut commands: Commands,
+	mouse_button: Res<ButtonInput<MouseButton>>,
+	track_building_mode: Res<TrackBuildingMode>,
+	mut draft_alignment: ResMut<DraftAlignment>,
+	terrain_mesh: Single<Entity, With<TerrainMesh>>,
+	terrain_heightmap: Single<&HeightMap>,
+	settings: Res<terrain::Settings>,
+	ray_map: Res<RayMap>,
+	mut raycast: MeshRayCast,
+	camera_query: Single<Entity, With<PanOrbitCamera>>,
+	mut egui_contexts: bevy_egui::EguiContexts,
+	existing_draft_pins: Query<Entity, With<DraftAlignmentPin>>,
+) {
+	// Only handle clicks when track building mode is active
+	if !track_building_mode.active {
+		// Clean up draft state when exiting track building mode
+		if draft_alignment.start.is_some() {
+			draft_alignment.start = None;
+			for entity in existing_draft_pins.iter() {
+				commands.entity(entity).despawn();
+			}
+		}
+		return;
+	}
+
+	// Only place initial point if we haven't placed one yet
+	if draft_alignment.start.is_some() {
+		return;
+	}
+
+	// Check for left mouse button click
+	if !mouse_button.just_pressed(MouseButton::Left) {
+		return;
+	}
+
+	info!("DEBUG: Left click detected in track building mode");
+
+	// Don't place points when clicking on egui UI
+	if let Ok(ctx) = egui_contexts.ctx_mut() {
+		if ctx.wants_pointer_input() || ctx.is_pointer_over_area() {
+			info!("DEBUG: Click blocked by egui");
+			return;
+		}
+	}
+
+	let camera_entity = *camera_query;
+	let terrain_entity = *terrain_mesh;
+	let heightmap = *terrain_heightmap;
+
+	// Find the ray for the mouse pointer
+	info!("DEBUG: Looking for ray, ray_map has {} entries", ray_map.iter().count());
+	let Some(ray) = ray_map
+		.iter()
+		.find(|(ray_id, _)| ray_id.pointer == PointerId::Mouse && ray_id.camera == camera_entity)
+		.map(|(_, ray)| *ray)
+	else {
+		info!("DEBUG: No ray found for mouse pointer");
+		return;
+	};
+
+	info!("DEBUG: Found ray, casting to terrain");
+
+	// Raycast to terrain
+	let filter = |entity: Entity| entity == terrain_entity;
+	let raycast_settings = MeshRayCastSettings::default().with_filter(&filter);
+	let hits = raycast.cast_ray(ray, &raycast_settings);
+
+	info!("DEBUG: Raycast returned {} hits", hits.len());
+
+	let Some(hit_point) = hits
+		.iter()
+		.find(|(entity, _)| *entity == terrain_entity)
+		.map(|(_, hit)| hit.point)
+	else {
+		info!("DEBUG: No terrain hit found");
+		return;
+	};
+
+	info!("DEBUG: Hit terrain at {:?}", hit_point);
+
+	// Calculate proper terrain height at hit point
+	let terrain_height = calculate_terrain_height(hit_point, &heightmap, &settings);
+	let start_position = Vec3::new(hit_point.x, terrain_height, hit_point.z);
+
+	// Store the start position in draft alignment
+	draft_alignment.start = Some(start_position);
+
+	// Create a visual pin at the start position
+	let world_size = world_size_for_height(&settings);
+	let normalized_pos = start_position / world_size;
+
+	let start_point = AlignmentPoint {
+		alignment_id: usize::MAX, // Use MAX as sentinel for draft
+		point_type: PointType::Start,
+	};
+	let start_color = start_point.get_color();
+
+	info!("DEBUG: Creating draft pin at {:?}", start_position);
+	commands.queue(create_draft_pin(
+		normalized_pos,
+		world_size,
+		start_point,
+		start_color,
+	));
+}
+
+/// Creates a draft pin (similar to regular pin but with DraftAlignmentPin marker)
+fn create_draft_pin(
+	initial_position: Vec3,
+	world_size: f32,
+	point_id: AlignmentPoint,
+	pinhead_color: Color,
+) -> impl Command {
+	use bevy::{gltf::GltfAssetLabel, render::render_resource::Face};
+	use crate::pin::Pin;
+
+	move |world: &mut World| {
+		let needle_mesh = {
+			let asset_server = world.resource::<AssetServer>();
+			asset_server.load(
+				GltfAssetLabel::Primitive {
+					mesh: 0,
+					primitive: 0,
+				}
+				.from_asset("pin.glb"),
+			)
+		};
+
+		let pinhead_mesh = {
+			let asset_server = world.resource::<AssetServer>();
+			asset_server.load(
+				GltfAssetLabel::Primitive {
+					mesh: 1,
+					primitive: 0,
+				}
+				.from_asset("pin.glb"),
+			)
+		};
+
+		let mut materials = world.resource_mut::<Assets<StandardMaterial>>();
+		let needle_material = materials.add(StandardMaterial::default());
+		let pinhead_material = materials.add(StandardMaterial {
+			base_color: pinhead_color,
+			cull_mode: Some(Face::Back),
+			..default()
+		});
+
+		let final_position = initial_position * world_size;
+
+		world
+			.spawn((
+				Pin,
+				DraftAlignmentPin,
+				point_id,
+				bevy::picking::Pickable::default(),
+				Transform::from_translation(final_position),
+				Visibility::default(),
+				InheritedVisibility::default(),
+				ViewVisibility::default(),
+			))
+			.with_children(|parent| {
+				parent.spawn((
+					Mesh3d(needle_mesh),
+					MeshMaterial3d(needle_material),
+					Transform::default(),
+				));
+				parent.spawn((
+					Mesh3d(pinhead_mesh),
+					MeshMaterial3d(pinhead_material),
+					Transform::default(),
+				));
+			});
 	}
 }

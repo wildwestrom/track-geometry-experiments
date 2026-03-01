@@ -14,6 +14,14 @@ pub(crate) struct TrackBuildingMode {
 	pub active: bool,
 }
 
+/// Tracks the state of a draft alignment being constructed.
+/// When a user clicks to place points, this resource holds the in-progress data.
+#[derive(Resource, Default)]
+pub(crate) struct DraftAlignment {
+	/// The starting point of the alignment being built
+	pub start: Option<Vec3>,
+}
+
 #[derive(Resource, Serialize, Deserialize)]
 pub(crate) struct AlignmentState {
 	pub turns: Turns,

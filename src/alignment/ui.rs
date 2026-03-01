@@ -6,7 +6,7 @@ use alignment_path::PathSegment;
 
 use super::components::{AlignmentPoint, PointType};
 use super::constraints::compute_max_angle;
-use super::state::{AlignmentState, TrackBuildingMode};
+use super::state::{AlignmentState, DraftAlignment, TrackBuildingMode};
 use super::{
 	FRAC_PI_180, GeometryDebugLevel, MAX_ARC_RADIUS, MAX_GEOMETRY_DEBUG_LEVEL, MAX_TURNS,
 	MIN_ARC_RADIUS,
@@ -17,6 +17,7 @@ pub(crate) fn ui(
 	mut alignment_state: ResMut<AlignmentState>,
 	mut path_debug_level: ResMut<GeometryDebugLevel>,
 	mut track_building_mode: ResMut<TrackBuildingMode>,
+	draft_alignment: Res<DraftAlignment>,
 	alignment_pins: Query<(&Transform, &AlignmentPoint)>,
 ) {
 	let path_debug_level = &mut path_debug_level.0;
@@ -33,6 +34,20 @@ pub(crate) fn ui(
 				};
 				if ui.button(button_text).clicked() {
 					track_building_mode.active = !track_building_mode.active;
+				}
+
+				// Show draft alignment status when in track building mode
+				if track_building_mode.active {
+					ui.separator();
+					if let Some(start) = draft_alignment.start {
+						ui.label(format!(
+							"Start: ({:.1}, {:.1}, {:.1})",
+							start.x, start.y, start.z
+						));
+						ui.label("Click to place end point...");
+					} else {
+						ui.label("Click on terrain to place start point");
+					}
 				}
 			});
 

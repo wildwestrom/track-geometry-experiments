@@ -28,6 +28,7 @@ impl Plugin for AlignmentPlugin {
 			.insert_resource(load_alignment())
 			.insert_resource(GeometryDebugLevel(2))
 			.init_resource::<TrackBuildingMode>()
+			.init_resource::<state::DraftAlignment>()
 			.init_gizmo_group::<AlignmentGizmos>()
 			.add_systems(Startup, (state::startup, configure_gizmos))
 			.add_systems(
@@ -46,6 +47,7 @@ impl Plugin for AlignmentPlugin {
 					systems::update_alignment_from_intermediate_pins,
 					render::render_alignment_path,
 					systems::toggle_track_building_mode,
+					systems::place_initial_point,
 				),
 			)
 			.add_systems(bevy_egui::EguiPrimaryContextPass, ui::ui);
