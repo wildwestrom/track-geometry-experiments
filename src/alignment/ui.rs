@@ -129,8 +129,8 @@ fn alignment_selection_ui(ui: &mut egui::Ui, alignment_state: &mut AlignmentStat
 	let mut id_to_delete: Option<usize> = None;
 
 	for (&id, alignment) in alignment_entries {
-		let n_tangents = alignment.n_tangents;
-		let label = match n_tangents {
+		let n_turns = alignment.turn_count();
+		let label = match n_turns {
 			0 => format!("Alignment {} (Straight)", id),
 			1 => format!("Alignment {} (1 Turn)", id),
 			n => format!("Alignment {} ({} Turns)", id, n),
@@ -163,24 +163,28 @@ fn vertex_properties_ui(ui: &mut egui::Ui, alignment_state: &mut AlignmentState)
 	if let Some(alignment) = &mut alignment_state
 		.alignments
 		.get_mut(&alignment_state.current_alignment)
-		&& alignment.n_tangents > 0
+		&& alignment.turn_count() > 0
 	{
 		let segments: &mut [PathSegment] = &mut alignment.segments;
-		// Precompute neighbor positions to avoid borrowing conflicts
-		let mut neighbor_positions: Vec<Vec3> = Vec::with_capacity(segments.len() + 2);
-		neighbor_positions.push(alignment.start);
-		for s in segments.iter() {
-			neighbor_positions.push(s.tangent_vertex);
+		let mut control_points: Vec<Vec3> = Vec::with_capacity(segments.len() + 2);
+		control_points.push(alignment.start);
+		for segment in segments.iter() {
+			control_points.push(segment.control_point());
 		}
-		neighbor_positions.push(alignment.end);
+		control_points.push(alignment.end);
 
+		let mut turn_index = 0;
 		for (i, segment) in segments.iter_mut().enumerate() {
-			let vertex = segment.tangent_vertex;
+			let Some(turn) = segment.as_turn_mut() else {
+				continue;
+			};
+			turn_index += 1;
+			let vertex = turn.tangent_vertex;
 			egui::Grid::new(format!("turn_{i}"))
 				.num_columns(2)
 				.spacing(egui::Vec2::splat(2.0))
 				.show(ui, |ui| {
-					ui.label(format!("Vertex {:.2}:", i + 1));
+					ui.label(format!("Turn {}:", turn_index));
 					ui.label(format!(
 						"({:.2}, {:.2}, {:.2})",
 						vertex.x, vertex.y, vertex.z,
@@ -188,17 +192,17 @@ fn vertex_properties_ui(ui: &mut egui::Ui, alignment_state: &mut AlignmentState)
 					ui.end_row();
 					ui.label("Angle:");
 					// Use shared constraints helper to determine slider max
-					let prev = neighbor_positions[i];
-					let next = neighbor_positions[i + 2];
+					let prev = control_points[i];
+					let next = control_points[i + 2];
 					let max_angle = compute_max_angle(prev, vertex, next);
-					if !segment.circular_section_angle.is_finite() || segment.circular_section_angle < 0.0 {
-						segment.circular_section_angle = 0.0;
+					if !turn.circular_section_angle.is_finite() || turn.circular_section_angle < 0.0 {
+						turn.circular_section_angle = 0.0;
 					}
-					if segment.circular_section_angle > max_angle {
-						segment.circular_section_angle = max_angle;
+					if turn.circular_section_angle > max_angle {
+						turn.circular_section_angle = max_angle;
 					}
 					ui.add(
-						egui::Slider::new(&mut segment.circular_section_angle, 0.0..=max_angle)
+						egui::Slider::new(&mut turn.circular_section_angle, 0.0..=max_angle)
 							.step_by(FRAC_PI_180)
 							.custom_parser(|s| s.parse::<f64>().ok().map(|f| f.to_radians()))
 							.custom_formatter(|val, _| format!("{:.0?}°", val.to_degrees())),
@@ -206,12 +210,11 @@ fn vertex_properties_ui(ui: &mut egui::Ui, alignment_state: &mut AlignmentState)
 					ui.end_row();
 					ui.label("Radius:");
 					// Enforce a minimum positive radius to avoid degenerate cases
-					if !segment.circular_section_radius.is_finite() || segment.circular_section_radius <= 0.0
-					{
-						segment.circular_section_radius = MIN_ARC_RADIUS;
+					if !turn.circular_section_radius.is_finite() || turn.circular_section_radius <= 0.0 {
+						turn.circular_section_radius = MIN_ARC_RADIUS;
 					}
 					ui.add(egui::Slider::new(
-						&mut segment.circular_section_radius,
+						&mut turn.circular_section_radius,
 						MIN_ARC_RADIUS..=MAX_ARC_RADIUS,
 					));
 				});

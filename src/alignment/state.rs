@@ -1,4 +1,4 @@
-use alignment_path::Alignment;
+use alignment_path::{Alignment, PathSegment};
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -84,15 +84,13 @@ pub(crate) fn build_preview_alignment(
 		return Alignment::new(start, end, 0);
 	}
 
-	let mut alignment = Alignment::new(start, end, 1);
+	let mut alignment = Alignment::new(start, end, 0);
 	let distance = start.distance(end);
 	let max_forward = (distance * 0.8).max(1.0);
 	let forward = (distance * 0.45).clamp(1.0, max_forward);
 	let mut tangent_vertex = start + previous_tangent * forward;
 	tangent_vertex.y = start.lerp(end, 0.45).y;
-	if let Some(segment) = alignment.segments.first_mut() {
-		segment.tangent_vertex = tangent_vertex;
-	}
+	alignment.append_turn(tangent_vertex);
 	alignment
 }
 
@@ -100,7 +98,7 @@ pub(crate) fn alignment_end_tangent(start: Vec3, end: Vec3, alignment: &Alignmen
 	let tangent = alignment
 		.segments
 		.last()
-		.map(|segment| end - segment.tangent_vertex)
+		.map(|segment| end - segment.control_point())
 		.unwrap_or(end - start);
 	normalize_xz(tangent)
 }
@@ -112,13 +110,13 @@ pub(crate) fn extend_alignment_with_preview(
 	previous_tangent: Option<Vec3>,
 ) {
 	let preview = build_preview_alignment(segment_start, segment_end, previous_tangent);
-	alignment.end = segment_end;
-
-	if let Some(preview_segment) = preview.segments.first() {
-		alignment.segments.push(*preview_segment);
+	alignment.append_segment_boundary(segment_start);
+	if let Some(preview_segment) = preview.segments.first()
+		&& let PathSegment::Turn(turn) = preview_segment
+	{
+		alignment.segments.push(PathSegment::Turn(*turn));
 	}
-
-	alignment.n_tangents = alignment.segments.len();
+	alignment.end = segment_end;
 	alignment_path::constraints::enforce_alignment_constraints(alignment);
 }
 
@@ -145,19 +143,15 @@ mod tests {
 			.segments
 			.first()
 			.expect("preview should contain one segment")
-			.tangent_vertex;
+			.control_point();
 
 		let mut alignment = Alignment::new(Vec3::new(-15.0, 0.0, 0.0), segment_start, 0);
-		extend_alignment_with_preview(
-			&mut alignment,
-			segment_start,
-			segment_end,
-			previous_tangent,
-		);
+		extend_alignment_with_preview(&mut alignment, segment_start, segment_end, previous_tangent);
 
 		assert_eq!(alignment.end, segment_end);
-		assert_eq!(alignment.segments.len(), 1);
-		assert_eq!(alignment.segments[0].tangent_vertex, preview_vertex);
+		assert_eq!(alignment.segments.len(), 2);
+		assert_eq!(alignment.segments[0].control_point(), segment_start);
+		assert_eq!(alignment.segments[1].control_point(), preview_vertex);
 	}
 
 	#[test]
@@ -167,15 +161,31 @@ mod tests {
 		let previous_tangent = Some(Vec3::X);
 		let mut alignment = Alignment::new(Vec3::new(-10.0, 0.0, 0.0), segment_start, 0);
 
-		extend_alignment_with_preview(
-			&mut alignment,
-			segment_start,
-			segment_end,
-			previous_tangent,
-		);
+		extend_alignment_with_preview(&mut alignment, segment_start, segment_end, previous_tangent);
 
 		assert_eq!(alignment.end, segment_end);
-		assert!(alignment.segments.is_empty());
+		assert_eq!(alignment.segments.len(), 1);
+		assert_eq!(alignment.segments[0].control_point(), segment_start);
+	}
+
+	#[test]
+	fn extend_alignment_allows_internal_straight_then_turn() {
+		let mut alignment = Alignment::new(Vec3::new(-10.0, 0.0, 0.0), Vec3::ZERO, 0);
+
+		let first_end = Vec3::new(20.0, 0.0, 0.0);
+		extend_alignment_with_preview(&mut alignment, Vec3::ZERO, first_end, Some(Vec3::X));
+		assert_eq!(alignment.end, first_end);
+		assert_eq!(alignment.segments.len(), 1);
+		assert_eq!(alignment.segments[0].control_point(), Vec3::ZERO);
+
+		let second_end = Vec3::new(30.0, 0.0, 15.0);
+		extend_alignment_with_preview(&mut alignment, first_end, second_end, Some(Vec3::X));
+
+		assert_eq!(alignment.end, second_end);
+		assert_eq!(alignment.segments.len(), 3);
+		assert_eq!(alignment.segments[0].control_point(), Vec3::ZERO);
+		assert_eq!(alignment.segments[1].control_point(), first_end);
+		assert!(matches!(alignment.segments[2], PathSegment::Turn(_)));
 	}
 }
 

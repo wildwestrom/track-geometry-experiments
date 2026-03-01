@@ -3,7 +3,7 @@ use std::f64::consts::PI;
 use glam::{Quat, Vec3};
 use spec_math::Fresnel;
 
-use crate::path::Alignment;
+use crate::path::{Alignment, TurnSegment};
 
 pub trait HeightSampler {
 	fn height_at(&self, position: Vec3) -> f32;
@@ -65,8 +65,7 @@ pub fn total_tangent_length(
 	let hv_i =
 		(r_i_abs + pf_i / cos_half_clothoid_angle) * (sin_half_omega / sin_half_interior_angle);
 
-	let total_tangent_length: f32 = (tp_i + ph_i + hv_i) as f32;
-	total_tangent_length
+	(hv_i + ph_i + tp_i) as f32
 }
 
 pub fn circular_arc_center(circular_section_radius_i: f32, f_i: Vec3, w_i: Vec3) -> Vec3 {
@@ -135,7 +134,19 @@ pub fn clothoid_point(
 
 #[derive(Clone)]
 pub struct AlignmentGeometry {
-	pub segments: Vec<CurveSegment>,
+	pub segments: Vec<GeometrySegment>,
+}
+
+#[derive(Clone, Copy)]
+pub enum GeometrySegment {
+	Straight(StraightGeometry),
+	Turn(CurveSegment),
+}
+
+#[derive(Clone, Copy)]
+pub struct StraightGeometry {
+	pub start: Vec3,
+	pub end: Vec3,
 }
 
 #[derive(Clone, Copy)]
@@ -203,154 +214,196 @@ pub fn calculate_alignment_geometry<H: HeightSampler>(
 	alignment: &Alignment,
 	height_sampler: &H,
 ) -> AlignmentGeometry {
-	let mut segments = Vec::new();
-
 	assert!(start.is_finite(), "start vertex must be finite: {start}");
 	assert!(end.is_finite(), "end vertex must be finite: {end}");
-	for (i, seg) in alignment.segments.iter().enumerate() {
-		assert!(
-			seg.tangent_vertex.is_finite(),
-			"segment {i} vertex is not finite: {}",
-			seg.tangent_vertex
-		);
-		assert!(
-			seg.circular_section_radius.is_finite(),
-			"segment {i} radius is not finite: {}",
-			seg.circular_section_radius
-		);
-		assert!(
-			seg.circular_section_angle.is_finite(),
-			"segment {i} angle is not finite: {}",
-			seg.circular_section_angle
-		);
-	}
 
-	if alignment.segments.is_empty() {
-		return AlignmentGeometry { segments };
-	}
+	let mut control_points = Vec::with_capacity(alignment.segments.len() + 2);
+	control_points.push(start);
 
 	for (i, segment) in alignment.segments.iter().enumerate() {
-		let tangent_vertex_i_minus_1 = if i == 0 {
-			start
-		} else {
-			alignment.segments[i - 1].tangent_vertex
-		};
-		let tangent_vertex_i = segment.tangent_vertex;
-		let tangent_vertex_i_plus_1 = alignment
-			.segments
-			.get(i + 1)
-			.map(|next| next.tangent_vertex)
-			.unwrap_or(end);
-
-		let circular_arc_radius_i = segment.circular_section_radius;
-		let circular_arc_angle_i = segment.circular_section_angle;
-
-		let unit_vector_i = unit_vector(tangent_vertex_i, tangent_vertex_i_minus_1);
-		let unit_vector_i_plus_1 = unit_vector(tangent_vertex_i_plus_1, tangent_vertex_i);
-
-		let azimuth_of_tangent_i = azimuth_of_tangent(tangent_vertex_i, tangent_vertex_i_minus_1);
-		let azimuth_of_tangent_i_plus_1 = azimuth_of_tangent(tangent_vertex_i_plus_1, tangent_vertex_i);
-
-		let difference_in_azimuth_i =
-			difference_in_azimuth(azimuth_of_tangent_i, azimuth_of_tangent_i_plus_1);
-		let length_of_circular_section = circular_section_length(
-			circular_arc_radius_i,
-			circular_arc_angle_i,
-			difference_in_azimuth_i,
+		let control_point = segment.control_point();
+		assert!(
+			control_point.is_finite(),
+			"segment {i} control point is not finite: {control_point}",
 		);
+		if let Some(turn) = segment.as_turn() {
+			assert!(
+				turn.circular_section_radius.is_finite(),
+				"segment {i} radius is not finite: {}",
+				turn.circular_section_radius
+			);
+			assert!(
+				turn.circular_section_angle.is_finite(),
+				"segment {i} angle is not finite: {}",
+				turn.circular_section_angle
+			);
+		}
+		control_points.push(control_point);
+	}
+	control_points.push(end);
 
-		let total_tangent_length_i = total_tangent_length(
-			circular_arc_radius_i,
-			circular_arc_angle_i,
-			difference_in_azimuth_i,
-			length_of_circular_section,
-		);
-
-		let ingoing_clothoid_start_point = tangent_vertex_i - total_tangent_length_i * unit_vector_i;
-
-		let r_i_abs = f64::from(circular_arc_radius_i.abs());
-		let l_c_abs = f64::from(length_of_circular_section.abs());
-
-		let cross_y = unit_vector_i.x.mul_add(
-			unit_vector_i_plus_1.z,
-			-(unit_vector_i.z * unit_vector_i_plus_1.x),
-		);
-		let lambda_i = if cross_y >= 0.0 { 1.0_f64 } else { -1.0_f64 };
-
-		let inner = (PI * r_i_abs * l_c_abs) / lambda_i;
-		let fresnel_scale = inner.abs().sqrt();
-		let fresnel_scale_sign = inner.signum();
-
-		let ingoing_beta = f64::from(unit_vector_i.z.atan2(unit_vector_i.x));
-		let ingoing_clothoid = ClothoidParameters {
-			endpoint: ingoing_clothoid_start_point,
-			length: l_c_abs,
-			beta: ingoing_beta,
-			fresnel_scale,
-			fresnel_scale_sign,
-			s_multiplier: 1.0,
+	let mut turn_geometry_by_control_point = vec![None; control_points.len()];
+	for (i, segment) in alignment.segments.iter().enumerate() {
+		let Some(turn) = segment.as_turn() else {
+			continue;
 		};
+		let previous = control_points[i];
+		let tangent_vertex = control_points[i + 1];
+		let next = control_points[i + 2];
+		if let Some(turn_geometry) =
+			compute_turn_geometry(previous, tangent_vertex, next, turn, height_sampler)
+		{
+			turn_geometry_by_control_point[i + 1] = Some(turn_geometry);
+		}
+	}
 
-		let circular_arc_start = circular_arc_start(
-			ingoing_clothoid_start_point,
-			l_c_abs,
-			ingoing_beta,
-			fresnel_scale,
-			fresnel_scale_sign,
-		);
-		let clothoid_angle_change =
-			lambda_i as f32 * (difference_in_azimuth_i - circular_arc_angle_i) / 2.0;
-		let clothoid_end_tangent_angle = unit_vector_i.z.atan2(unit_vector_i.x) + clothoid_angle_change;
+	let mut segments = Vec::new();
+	for edge_idx in 0..control_points.len().saturating_sub(1) {
+		let left_cp = control_points[edge_idx];
+		let right_cp = control_points[edge_idx + 1];
 
-		let w_i_vector = w_i_vector(lambda_i as f32, clothoid_end_tangent_angle);
-		let circular_arc_center =
-			circular_arc_center(circular_arc_radius_i, circular_arc_start, w_i_vector);
-		let start_vector = circular_arc_start - circular_arc_center;
+		let straight_start = turn_geometry_by_control_point[edge_idx]
+			.map(|turn| turn.outgoing_clothoid_end)
+			.unwrap_or(left_cp);
+		let straight_end = turn_geometry_by_control_point[edge_idx + 1]
+			.map(|turn| turn.ingoing_clothoid_start)
+			.unwrap_or(right_cp);
 
-		let arc_sweep = -lambda_i.signum() as f32 * circular_arc_angle_i;
-		let arc_end_point = {
-			let start_vector_from_center = start_vector;
-			let rotation = Quat::from_axis_angle(Vec3::Y, arc_sweep);
-			let xz_pos = circular_arc_center + rotation * start_vector_from_center;
-			let y_pos = height_sampler.height_at(xz_pos);
-			Vec3::new(xz_pos.x, y_pos, xz_pos.z)
-		};
+		if straight_start.distance_squared(straight_end) > f32::EPSILON {
+			segments.push(GeometrySegment::Straight(StraightGeometry {
+				start: straight_start,
+				end: straight_end,
+			}));
+		}
 
-		let circular_arc = CircularArcGeometry {
-			start_point: circular_arc_start,
-			center: circular_arc_center,
-			start_vector,
-			arc_sweep,
-			start_elevation: circular_arc_start.y,
-			end_point: arc_end_point,
-			end_elevation: arc_end_point.y,
-		};
-
-		let clothoid_transition_end = tangent_vertex_i + total_tangent_length_i * unit_vector_i_plus_1;
-
-		let outgoing_beta = f64::from(unit_vector_i_plus_1.z.atan2(unit_vector_i_plus_1.x));
-		let outgoing_clothoid = ClothoidParameters {
-			endpoint: clothoid_transition_end,
-			length: l_c_abs,
-			beta: outgoing_beta,
-			fresnel_scale,
-			fresnel_scale_sign: -fresnel_scale_sign,
-			s_multiplier: -1.0,
-		};
-
-		segments.push(CurveSegment {
-			tangent_vertex_prev: tangent_vertex_i_minus_1,
-			tangent_vertex: tangent_vertex_i,
-			tangent_vertex_next: tangent_vertex_i_plus_1,
-			ingoing_clothoid_start: ingoing_clothoid_start_point,
-			ingoing_clothoid,
-			circular_arc,
-			outgoing_clothoid_end: clothoid_transition_end,
-			outgoing_clothoid,
-			azimuth_of_tangent: azimuth_of_tangent_i,
-			difference_in_azimuth: difference_in_azimuth_i,
-		});
+		if let Some(turn_geometry) = turn_geometry_by_control_point[edge_idx + 1] {
+			segments.push(GeometrySegment::Turn(turn_geometry));
+		}
 	}
 
 	AlignmentGeometry { segments }
+}
+
+fn compute_turn_geometry<H: HeightSampler>(
+	tangent_vertex_i_minus_1: Vec3,
+	tangent_vertex_i: Vec3,
+	tangent_vertex_i_plus_1: Vec3,
+	turn: &TurnSegment,
+	height_sampler: &H,
+) -> Option<CurveSegment> {
+	let circular_arc_radius_i = turn.circular_section_radius;
+	let circular_arc_angle_i = turn.circular_section_angle;
+
+	let unit_vector_i = unit_vector(tangent_vertex_i, tangent_vertex_i_minus_1);
+	let unit_vector_i_plus_1 = unit_vector(tangent_vertex_i_plus_1, tangent_vertex_i);
+	if !unit_vector_i.is_finite() || !unit_vector_i_plus_1.is_finite() {
+		return None;
+	}
+
+	let azimuth_of_tangent_i = azimuth_of_tangent(tangent_vertex_i, tangent_vertex_i_minus_1);
+	let azimuth_of_tangent_i_plus_1 = azimuth_of_tangent(tangent_vertex_i_plus_1, tangent_vertex_i);
+
+	let difference_in_azimuth_i =
+		difference_in_azimuth(azimuth_of_tangent_i, azimuth_of_tangent_i_plus_1);
+	if difference_in_azimuth_i <= f32::EPSILON {
+		return None;
+	}
+
+	let length_of_circular_section = circular_section_length(
+		circular_arc_radius_i,
+		circular_arc_angle_i,
+		difference_in_azimuth_i,
+	);
+
+	let total_tangent_length_i = total_tangent_length(
+		circular_arc_radius_i,
+		circular_arc_angle_i,
+		difference_in_azimuth_i,
+		length_of_circular_section,
+	);
+
+	let ingoing_clothoid_start_point = tangent_vertex_i - total_tangent_length_i * unit_vector_i;
+
+	let r_i_abs = f64::from(circular_arc_radius_i.abs());
+	let l_c_abs = f64::from(length_of_circular_section.abs());
+
+	let cross_y = unit_vector_i.x.mul_add(
+		unit_vector_i_plus_1.z,
+		-(unit_vector_i.z * unit_vector_i_plus_1.x),
+	);
+	let lambda_i = if cross_y >= 0.0 { 1.0_f64 } else { -1.0_f64 };
+
+	let inner = (PI * r_i_abs * l_c_abs) / lambda_i;
+	let fresnel_scale = inner.abs().sqrt();
+	let fresnel_scale_sign = inner.signum();
+
+	let ingoing_beta = f64::from(unit_vector_i.z.atan2(unit_vector_i.x));
+	let ingoing_clothoid = ClothoidParameters {
+		endpoint: ingoing_clothoid_start_point,
+		length: l_c_abs,
+		beta: ingoing_beta,
+		fresnel_scale,
+		fresnel_scale_sign,
+		s_multiplier: 1.0,
+	};
+
+	let circular_arc_start = circular_arc_start(
+		ingoing_clothoid_start_point,
+		l_c_abs,
+		ingoing_beta,
+		fresnel_scale,
+		fresnel_scale_sign,
+	);
+	let clothoid_angle_change =
+		lambda_i as f32 * (difference_in_azimuth_i - circular_arc_angle_i) / 2.0;
+	let clothoid_end_tangent_angle = unit_vector_i.z.atan2(unit_vector_i.x) + clothoid_angle_change;
+
+	let w_i_vector = w_i_vector(lambda_i as f32, clothoid_end_tangent_angle);
+	let circular_arc_center =
+		circular_arc_center(circular_arc_radius_i, circular_arc_start, w_i_vector);
+	let start_vector = circular_arc_start - circular_arc_center;
+
+	let arc_sweep = -lambda_i.signum() as f32 * circular_arc_angle_i;
+	let arc_end_point = {
+		let start_vector_from_center = start_vector;
+		let rotation = Quat::from_axis_angle(Vec3::Y, arc_sweep);
+		let xz_pos = circular_arc_center + rotation * start_vector_from_center;
+		let y_pos = height_sampler.height_at(xz_pos);
+		Vec3::new(xz_pos.x, y_pos, xz_pos.z)
+	};
+
+	let circular_arc = CircularArcGeometry {
+		start_point: circular_arc_start,
+		center: circular_arc_center,
+		start_vector,
+		arc_sweep,
+		start_elevation: circular_arc_start.y,
+		end_point: arc_end_point,
+		end_elevation: arc_end_point.y,
+	};
+
+	let clothoid_transition_end = tangent_vertex_i + total_tangent_length_i * unit_vector_i_plus_1;
+
+	let outgoing_beta = f64::from(unit_vector_i_plus_1.z.atan2(unit_vector_i_plus_1.x));
+	let outgoing_clothoid = ClothoidParameters {
+		endpoint: clothoid_transition_end,
+		length: l_c_abs,
+		beta: outgoing_beta,
+		fresnel_scale,
+		fresnel_scale_sign: -fresnel_scale_sign,
+		s_multiplier: -1.0,
+	};
+
+	Some(CurveSegment {
+		tangent_vertex_prev: tangent_vertex_i_minus_1,
+		tangent_vertex: tangent_vertex_i,
+		tangent_vertex_next: tangent_vertex_i_plus_1,
+		ingoing_clothoid_start: ingoing_clothoid_start_point,
+		ingoing_clothoid,
+		circular_arc,
+		outgoing_clothoid_end: clothoid_transition_end,
+		outgoing_clothoid,
+		azimuth_of_tangent: azimuth_of_tangent_i,
+		difference_in_azimuth: difference_in_azimuth_i,
+	})
 }

@@ -1,4 +1,4 @@
-use alignment_path::{CurveSegment, HeightSampler, calculate_alignment_geometry};
+use alignment_path::{CurveSegment, GeometrySegment, HeightSampler, calculate_alignment_geometry};
 use bevy::color::palettes::css::*;
 use bevy::picking::{
 	backend::ray::RayMap,
@@ -139,14 +139,23 @@ fn draw_alignment_geometry<H: HeightSampler>(
 ) {
 	let alignment_geometry = calculate_alignment_geometry(start, end, alignment, sampler);
 
-	// For straight alignments (no intermediate tangent points), just draw a line.
+	// Degenerate fallback when the geometry pipeline has no drawable pieces.
 	if alignment_geometry.segments.is_empty() && geometry_debug_level >= 1 {
 		gizmos.line(start, end, AQUA);
 		return;
 	}
 
-	let mut c_i_minus_1 = None;
-	for (index, segment) in alignment_geometry.segments.iter().enumerate() {
+	for segment in alignment_geometry.segments.iter() {
+		if let GeometrySegment::Straight(straight) = segment {
+			if geometry_debug_level >= 1 {
+				gizmos.line(straight.start, straight.end, AQUA);
+			}
+			continue;
+		}
+
+		let GeometrySegment::Turn(segment) = segment else {
+			continue;
+		};
 		if geometry_debug_level >= 3 {
 			debug_angles(gizmos, segment);
 		}
@@ -191,31 +200,6 @@ fn draw_alignment_geometry<H: HeightSampler>(
 				STEEL_BLUE,
 			);
 		}
-
-		if geometry_debug_level >= 1 {
-			if let Some(previous_transition_end) = c_i_minus_1 {
-				gizmos.line(
-					previous_transition_end,
-					segment.ingoing_clothoid_start,
-					AQUA,
-				);
-			} else {
-				gizmos.line(
-					segment.tangent_vertex_prev,
-					segment.ingoing_clothoid_start,
-					AQUA,
-				);
-			}
-
-			if index == alignment_geometry.segments.len().saturating_sub(1) {
-				gizmos.line(
-					segment.outgoing_clothoid_end,
-					segment.tangent_vertex_next,
-					AQUA,
-				);
-			}
-		}
-		c_i_minus_1 = Some(segment.outgoing_clothoid_end);
 
 		let outgoing_params = segment.outgoing_clothoid;
 		let outgoing_clothoid =
