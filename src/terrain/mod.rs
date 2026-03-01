@@ -15,8 +15,8 @@ use noise::{HybridMulti, MultiFractal, NoiseFn, OpenSimplex};
 use serde::{Deserialize, Serialize};
 
 mod contour_lines;
-use crate::{saveable::SaveableSettings, terrain::contour_lines::ContourLinePlugin};
 use crate::ui_shell::{ActivePanel, UiShellState};
+use crate::{saveable::SaveableSettings, terrain::contour_lines::ContourLinePlugin};
 
 /// Public plugin to generate and visualize terrain. Self-contained with no external app deps.
 pub struct TerrainPlugin;

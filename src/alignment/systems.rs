@@ -151,8 +151,7 @@ pub(crate) fn update_alignment_pins(
 				alignment_id: current_alignment,
 				point_type: PointType::Intermediate { segment_index: i },
 			};
-			let point_color = if matches!(alignment.segments.get(i), Some(PathSegment::Straight(_)))
-			{
+			let point_color = if matches!(alignment.segments.get(i), Some(PathSegment::Straight(_))) {
 				Color::Srgba(YELLOW)
 			} else {
 				alignment_point.get_color()

@@ -1,4 +1,5 @@
 use crate::terrain;
+use crate::ui_shell::{ActivePanel, UiShellState};
 use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 use bevy::render::render_resource::{
@@ -7,7 +8,6 @@ use bevy::render::render_resource::{
 use bevy::shader::ShaderRef;
 use bevy_egui::{EguiContexts, egui};
 use log::debug;
-use crate::ui_shell::{ActivePanel, UiShellState};
 
 pub struct ContourLinePlugin;
 
