@@ -1,4 +1,4 @@
-use alignment_path::{Alignment, PathSegment};
+use alignment_path::Alignment;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -115,10 +115,7 @@ pub(crate) fn extend_alignment_with_preview(
 	alignment.end = segment_end;
 
 	if let Some(preview_segment) = preview.segments.first() {
-		let mut junction_segment = PathSegment::new(segment_start);
-		junction_segment.circular_section_radius = preview_segment.circular_section_radius;
-		junction_segment.circular_section_angle = preview_segment.circular_section_angle;
-		alignment.segments.push(junction_segment);
+		alignment.segments.push(*preview_segment);
 	}
 
 	alignment.n_tangents = alignment.segments.len();
@@ -132,6 +129,54 @@ fn normalize_xz(vector: Vec3) -> Option<Vec3> {
 		return None;
 	}
 	Some(xz / length)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn extend_alignment_preserves_preview_tangent_vertex() {
+		let segment_start = Vec3::new(0.0, 0.0, 0.0);
+		let segment_end = Vec3::new(20.0, 0.0, 10.0);
+		let previous_tangent = Some(Vec3::X);
+		let preview = build_preview_alignment(segment_start, segment_end, previous_tangent);
+		let preview_vertex = preview
+			.segments
+			.first()
+			.expect("preview should contain one segment")
+			.tangent_vertex;
+
+		let mut alignment = Alignment::new(Vec3::new(-15.0, 0.0, 0.0), segment_start, 0);
+		extend_alignment_with_preview(
+			&mut alignment,
+			segment_start,
+			segment_end,
+			previous_tangent,
+		);
+
+		assert_eq!(alignment.end, segment_end);
+		assert_eq!(alignment.segments.len(), 1);
+		assert_eq!(alignment.segments[0].tangent_vertex, preview_vertex);
+	}
+
+	#[test]
+	fn extend_alignment_keeps_straight_segment_without_new_vertex() {
+		let segment_start = Vec3::new(0.0, 0.0, 0.0);
+		let segment_end = Vec3::new(25.0, 0.0, 0.0);
+		let previous_tangent = Some(Vec3::X);
+		let mut alignment = Alignment::new(Vec3::new(-10.0, 0.0, 0.0), segment_start, 0);
+
+		extend_alignment_with_preview(
+			&mut alignment,
+			segment_start,
+			segment_end,
+			previous_tangent,
+		);
+
+		assert_eq!(alignment.end, segment_end);
+		assert!(alignment.segments.is_empty());
+	}
 }
 
 impl SaveableSettings for AlignmentState {
