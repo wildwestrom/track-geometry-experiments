@@ -135,6 +135,13 @@ fn contour_controls_ui(
 	}
 
 	if let Ok(ctx) = contexts.ctx_mut() {
+		let mut color_array = contour_state.line_color_array();
+		let mut interval = contour_state.settings.interval;
+		let mut line_thickness = contour_state.settings.line_thickness;
+		let mut color_changed = false;
+		let mut interval_changed = false;
+		let mut thickness_changed = false;
+
 		egui::Window::new("Contour Settings")
 			.fixed_pos(egui::pos2(8.0, 8.0))
 			.movable(false)
@@ -143,29 +150,43 @@ fn contour_controls_ui(
 				// Color picker
 				ui.horizontal(|ui| {
 					ui.label("Line Color:");
-					let mut color_array = contour_state.line_color_array();
 					if ui.color_edit_button_rgb(&mut color_array).changed() {
-						contour_state.set_line_color_array(color_array);
+						color_changed = true;
 					}
 				});
 
 				// Interval slider
 				ui.horizontal(|ui| {
 					ui.label("Interval:");
-					ui.add(
-						egui::Slider::new(&mut contour_state.settings.interval, 1.0..=200.0).suffix(" units"),
-					);
+					if ui
+						.add(egui::Slider::new(&mut interval, 1.0..=200.0).suffix(" units"))
+						.changed()
+					{
+						interval_changed = true;
+					}
 				});
 
 				// Thickness slider
 				ui.horizontal(|ui| {
 					ui.label("Thickness:");
-					ui.add(egui::Slider::new(
-						&mut contour_state.settings.line_thickness,
-						0.1..=10.0,
-					));
+					if ui
+						.add(egui::Slider::new(&mut line_thickness, 0.1..=10.0))
+						.changed()
+					{
+						thickness_changed = true;
+					}
 				});
 			});
+
+		if color_changed {
+			contour_state.set_line_color_array(color_array);
+		}
+		if interval_changed {
+			contour_state.settings.interval = interval;
+		}
+		if thickness_changed {
+			contour_state.settings.line_thickness = line_thickness;
+		}
 	}
 }
 
