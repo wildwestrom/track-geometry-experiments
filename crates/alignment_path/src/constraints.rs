@@ -3,7 +3,7 @@ use glam::Vec3;
 use crate::geometry::{
 	azimuth_of_tangent, circular_section_length, difference_in_azimuth, total_tangent_length,
 };
-use crate::path::{Alignment, PathSegment, TurnSegment};
+use crate::path::{Alignment, PathSegment, TurnSegment, project_fraction_onto_span};
 
 pub const MIN_ARC_RADIUS: f32 = 1.0;
 pub const MAX_ARC_RADIUS: f32 = 2000.0;
@@ -52,14 +52,8 @@ pub fn enforce_alignment_constraints(alignment: &mut Alignment) {
 		return;
 	}
 
-	let mut control_points: Vec<Vec3> = Vec::with_capacity(alignment.segments.len() + 2);
-	control_points.push(alignment.start);
-	for segment in &alignment.segments {
-		control_points.push(segment.control_point());
-	}
-	control_points.push(alignment.end);
-
-	enforce_straight_boundary_tangency(&mut alignment.segments, &mut control_points);
+	enforce_straight_boundary_fractions(alignment);
+	let control_points = alignment.control_points();
 
 	for (i, segment) in alignment.segments.iter_mut().enumerate() {
 		let Some(turn) = segment.as_turn_mut() else {
@@ -73,34 +67,44 @@ pub fn enforce_alignment_constraints(alignment: &mut Alignment) {
 	clamp_shared_edge_tangents(&mut alignment.segments, &control_points);
 }
 
-fn enforce_straight_boundary_tangency(segments: &mut [PathSegment], control_points: &mut [Vec3]) {
-	for (i, segment) in segments.iter_mut().enumerate() {
-		if !matches!(segment, PathSegment::Straight(_)) {
+fn enforce_straight_boundary_fractions(alignment: &mut Alignment) {
+	let control_points = alignment.control_points();
+
+	let mut run_start = 0;
+	while run_start < alignment.segments.len() {
+		if !matches!(alignment.segments[run_start], PathSegment::Straight(_)) {
+			run_start += 1;
 			continue;
 		}
 
-		let previous = control_points[i];
-		let current = control_points[i + 1];
-		let next = control_points[i + 2];
-
-		let span = next - previous;
-		let span_length_sq = span.length_squared();
-		if !span_length_sq.is_finite() || span_length_sq <= f32::EPSILON {
-			continue;
+		let mut run_end = run_start;
+		while run_end + 1 < alignment.segments.len()
+			&& matches!(alignment.segments[run_end + 1], PathSegment::Straight(_))
+		{
+			run_end += 1;
 		}
 
-		let t = ((current - previous).dot(span) / span_length_sq)
-			.clamp(STRAIGHT_BOUNDARY_EPSILON, 1.0 - STRAIGHT_BOUNDARY_EPSILON);
-		let projected = previous + span * t;
-		if !projected.is_finite() {
-			continue;
-		}
-		if projected.distance_squared(current) <= 1.0e-10 {
-			continue;
+		let section_start = control_points[run_start];
+		let section_end = control_points[run_end + 2];
+		let run_len = run_end - run_start + 1;
+		let max_fraction = 1.0 - STRAIGHT_BOUNDARY_EPSILON;
+		let mut min_fraction = STRAIGHT_BOUNDARY_EPSILON;
+
+		for offset in 0..run_len {
+			let segment_index = run_start + offset;
+			let current = control_points[segment_index + 1];
+			let projected_fraction = project_fraction_onto_span(current, section_start, section_end);
+			let remaining = run_len - offset - 1;
+			let max_for_current =
+				(max_fraction - STRAIGHT_BOUNDARY_EPSILON * remaining as f32).max(min_fraction);
+			let normalized_fraction = projected_fraction.clamp(min_fraction, max_for_current);
+			if let Some(straight) = alignment.segments[segment_index].as_straight_mut() {
+				straight.set_fraction(normalized_fraction);
+			}
+			min_fraction = (normalized_fraction + STRAIGHT_BOUNDARY_EPSILON).min(max_fraction);
 		}
 
-		segment.set_control_point(projected);
-		control_points[i + 1] = projected;
+		run_start = run_end + 1;
 	}
 }
 
@@ -237,20 +241,45 @@ mod tests {
 	use crate::path::StraightSegment;
 
 	#[test]
-	fn straight_boundary_is_projected_to_be_tangent() {
+	fn straight_boundary_fraction_is_clamped_to_tangent_span() {
 		let mut alignment = Alignment {
 			start: Vec3::new(0.0, 0.0, 0.0),
 			end: Vec3::new(10.0, 0.0, 0.0),
-			segments: vec![PathSegment::Straight(StraightSegment {
-				point: Vec3::new(5.0, 0.0, 3.0),
-			})],
+			segments: vec![PathSegment::Straight(StraightSegment::from_fraction(0.5))],
+		};
+		if let Some(straight) = alignment.segments[0].as_straight_mut() {
+			straight.fraction = 1.25;
+		}
+
+		enforce_alignment_constraints(&mut alignment);
+
+		let boundary = alignment
+			.segment_control_point(0)
+			.expect("straight segment must resolve to a control point");
+		assert!(boundary.z.abs() < 1.0e-4);
+		assert!(boundary.x > 0.0);
+		assert!(boundary.x < 10.0);
+	}
+
+	#[test]
+	fn consecutive_straight_boundaries_remain_ordered() {
+		let mut alignment = Alignment {
+			start: Vec3::ZERO,
+			end: Vec3::new(10.0, 0.0, 0.0),
+			segments: vec![
+				PathSegment::Straight(StraightSegment::from_fraction(0.8)),
+				PathSegment::Straight(StraightSegment::from_fraction(0.2)),
+			],
 		};
 
 		enforce_alignment_constraints(&mut alignment);
 
-		let boundary = alignment.segments[0].control_point();
-		assert!(boundary.z.abs() < 1.0e-4);
-		assert!(boundary.x > 0.0);
-		assert!(boundary.x < 10.0);
+		let first = alignment
+			.segment_control_point(0)
+			.expect("first straight control point should resolve");
+		let second = alignment
+			.segment_control_point(1)
+			.expect("second straight control point should resolve");
+		assert!(first.x < second.x);
 	}
 }

@@ -217,11 +217,10 @@ pub fn calculate_alignment_geometry<H: HeightSampler>(
 	assert!(start.is_finite(), "start vertex must be finite: {start}");
 	assert!(end.is_finite(), "end vertex must be finite: {end}");
 
-	let mut control_points = Vec::with_capacity(alignment.segments.len() + 2);
-	control_points.push(start);
+	let control_points = alignment.control_points_with_endpoints(start, end);
 
 	for (i, segment) in alignment.segments.iter().enumerate() {
-		let control_point = segment.control_point();
+		let control_point = control_points[i + 1];
 		assert!(
 			control_point.is_finite(),
 			"segment {i} control point is not finite: {control_point}",
@@ -238,9 +237,7 @@ pub fn calculate_alignment_geometry<H: HeightSampler>(
 				turn.circular_section_angle
 			);
 		}
-		control_points.push(control_point);
 	}
-	control_points.push(end);
 
 	let mut turn_geometry_by_control_point = vec![None; control_points.len()];
 	for (i, segment) in alignment.segments.iter().enumerate() {

@@ -141,8 +141,11 @@ pub(crate) fn update_alignment_pins(
 			end_color,
 		));
 
-		for (i, segment) in alignment.segments.iter().enumerate() {
-			let normalized_pos = segment.control_point() / world_size;
+		for (i, _) in alignment.segments.iter().enumerate() {
+			let Some(control_point) = alignment.segment_control_point(i) else {
+				continue;
+			};
+			let normalized_pos = control_point / world_size;
 			let alignment_point = AlignmentPoint {
 				alignment_id: current_alignment,
 				point_type: PointType::Intermediate { segment_index: i },
@@ -182,10 +185,11 @@ pub(crate) fn update_alignment_from_intermediate_pins(
 				.alignments
 				.get_mut(&intermediate_point.alignment_id)
 			{
-				if let Some(segment) = alignment.segments.get_mut(segment_index) {
-					if segment.control_point() != transform.translation {
-						segment.set_control_point(transform.translation);
-					}
+				if alignment
+					.segment_control_point(segment_index)
+					.is_some_and(|point| point != transform.translation)
+				{
+					alignment.set_segment_control_point(segment_index, transform.translation);
 				}
 			}
 		}
@@ -221,8 +225,8 @@ pub(crate) fn update_pins_from_alignment_state(
 							transform.translation = alignment.end;
 						}
 						PointType::Intermediate { segment_index } => {
-							if let Some(segment) = alignment.segments.get(segment_index) {
-								transform.translation = segment.control_point();
+							if let Some(control_point) = alignment.segment_control_point(segment_index) {
+								transform.translation = control_point;
 							}
 						}
 					}

@@ -165,13 +165,8 @@ fn vertex_properties_ui(ui: &mut egui::Ui, alignment_state: &mut AlignmentState)
 		.get_mut(&alignment_state.current_alignment)
 		&& alignment.turn_count() > 0
 	{
+		let control_points = alignment.control_points();
 		let segments: &mut [PathSegment] = &mut alignment.segments;
-		let mut control_points: Vec<Vec3> = Vec::with_capacity(segments.len() + 2);
-		control_points.push(alignment.start);
-		for segment in segments.iter() {
-			control_points.push(segment.control_point());
-		}
-		control_points.push(alignment.end);
 
 		let mut turn_index = 0;
 		for (i, segment) in segments.iter_mut().enumerate() {

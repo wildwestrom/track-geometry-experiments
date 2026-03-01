@@ -97,8 +97,10 @@ pub(crate) fn build_preview_alignment(
 pub(crate) fn alignment_end_tangent(start: Vec3, end: Vec3, alignment: &Alignment) -> Option<Vec3> {
 	let tangent = alignment
 		.segments
-		.last()
-		.map(|segment| end - segment.control_point())
+		.len()
+		.checked_sub(1)
+		.and_then(|segment_index| alignment.segment_control_point(segment_index))
+		.map(|control_point| end - control_point)
 		.unwrap_or(end - start);
 	normalize_xz(tangent)
 }
@@ -110,11 +112,19 @@ pub(crate) fn extend_alignment_with_preview(
 	previous_tangent: Option<Vec3>,
 ) {
 	let preview = build_preview_alignment(segment_start, segment_end, previous_tangent);
-	alignment.append_segment_boundary(segment_start);
-	if let Some(preview_segment) = preview.segments.first()
-		&& let PathSegment::Turn(turn) = preview_segment
-	{
-		alignment.segments.push(PathSegment::Turn(*turn));
+	let preview_turn = preview.segments.first().and_then(|preview_segment| {
+		if let PathSegment::Turn(turn) = preview_segment {
+			Some(*turn)
+		} else {
+			None
+		}
+	});
+	let next_anchor = preview_turn
+		.map(|turn| turn.tangent_vertex)
+		.unwrap_or(segment_end);
+	alignment.append_segment_boundary(segment_start, next_anchor);
+	if let Some(turn) = preview_turn {
+		alignment.segments.push(PathSegment::Turn(turn));
 	}
 	alignment.end = segment_end;
 	alignment_path::constraints::enforce_alignment_constraints(alignment);
@@ -133,6 +143,14 @@ fn normalize_xz(vector: Vec3) -> Option<Vec3> {
 mod tests {
 	use super::*;
 
+	fn assert_vec3_approx_eq(actual: Vec3, expected: Vec3) {
+		let delta = actual.distance(expected);
+		assert!(
+			delta <= 1.0e-3,
+			"expected {expected:?}, got {actual:?} (|delta|={delta})",
+		);
+	}
+
 	#[test]
 	fn extend_alignment_preserves_preview_tangent_vertex() {
 		let segment_start = Vec3::new(0.0, 0.0, 0.0);
@@ -142,16 +160,27 @@ mod tests {
 		let preview_vertex = preview
 			.segments
 			.first()
-			.expect("preview should contain one segment")
-			.control_point();
+			.and_then(PathSegment::as_turn)
+			.map(|turn| turn.tangent_vertex)
+			.expect("preview should contain one turn segment");
 
 		let mut alignment = Alignment::new(Vec3::new(-15.0, 0.0, 0.0), segment_start, 0);
 		extend_alignment_with_preview(&mut alignment, segment_start, segment_end, previous_tangent);
 
 		assert_eq!(alignment.end, segment_end);
 		assert_eq!(alignment.segments.len(), 2);
-		assert_eq!(alignment.segments[0].control_point(), segment_start);
-		assert_eq!(alignment.segments[1].control_point(), preview_vertex);
+		assert_vec3_approx_eq(
+			alignment
+				.segment_control_point(0)
+				.expect("first control point should exist"),
+			segment_start,
+		);
+		assert_vec3_approx_eq(
+			alignment
+				.segment_control_point(1)
+				.expect("second control point should exist"),
+			preview_vertex,
+		);
 	}
 
 	#[test]
@@ -165,7 +194,12 @@ mod tests {
 
 		assert_eq!(alignment.end, segment_end);
 		assert_eq!(alignment.segments.len(), 1);
-		assert_eq!(alignment.segments[0].control_point(), segment_start);
+		assert_vec3_approx_eq(
+			alignment
+				.segment_control_point(0)
+				.expect("straight boundary should exist"),
+			segment_start,
+		);
 	}
 
 	#[test]
@@ -176,15 +210,81 @@ mod tests {
 		extend_alignment_with_preview(&mut alignment, Vec3::ZERO, first_end, Some(Vec3::X));
 		assert_eq!(alignment.end, first_end);
 		assert_eq!(alignment.segments.len(), 1);
-		assert_eq!(alignment.segments[0].control_point(), Vec3::ZERO);
+		assert_vec3_approx_eq(
+			alignment
+				.segment_control_point(0)
+				.expect("first control point should exist"),
+			Vec3::ZERO,
+		);
 
 		let second_end = Vec3::new(30.0, 0.0, 15.0);
 		extend_alignment_with_preview(&mut alignment, first_end, second_end, Some(Vec3::X));
 
 		assert_eq!(alignment.end, second_end);
 		assert_eq!(alignment.segments.len(), 3);
-		assert_eq!(alignment.segments[0].control_point(), Vec3::ZERO);
-		assert_eq!(alignment.segments[1].control_point(), first_end);
+		assert_vec3_approx_eq(
+			alignment
+				.segment_control_point(0)
+				.expect("first control point should exist"),
+			Vec3::ZERO,
+		);
+		assert_vec3_approx_eq(
+			alignment
+				.segment_control_point(1)
+				.expect("second control point should exist"),
+			first_end,
+		);
+		assert!(matches!(alignment.segments[2], PathSegment::Turn(_)));
+	}
+
+	#[test]
+	fn tangent_snap_extension_keeps_previous_end_as_fractional_straight_node() {
+		let initial_start = Vec3::new(-10.0, 0.0, 0.0);
+		let initial_end = Vec3::new(20.0, 0.0, 0.0);
+		let new_end = Vec3::new(40.0, 0.0, 0.0);
+		let mut alignment = Alignment::new(initial_start, initial_end, 0);
+
+		extend_alignment_with_preview(&mut alignment, initial_end, new_end, Some(Vec3::X));
+
+		assert_eq!(alignment.end, new_end);
+		assert_eq!(alignment.segments.len(), 1);
+		assert_vec3_approx_eq(
+			alignment
+				.segment_control_point(0)
+				.expect("straight node should resolve"),
+			initial_end,
+		);
+		let straight = alignment.segments[0]
+			.as_straight()
+			.expect("segment should be straight");
+		assert!((straight.fraction() - 0.6).abs() < 1.0e-4);
+	}
+
+	#[test]
+	fn curve_after_snapped_straights_preserves_straight_nodes() {
+		let initial_start = Vec3::new(0.0, 0.0, 0.0);
+		let first_end = Vec3::new(10.0, 0.0, 0.0);
+		let second_end = Vec3::new(20.0, 0.0, 0.0);
+		let curve_end = Vec3::new(28.0, 0.0, 8.0);
+		let mut alignment = Alignment::new(initial_start, first_end, 0);
+
+		extend_alignment_with_preview(&mut alignment, first_end, second_end, Some(Vec3::X));
+		extend_alignment_with_preview(&mut alignment, second_end, curve_end, Some(Vec3::X));
+
+		assert_eq!(alignment.end, curve_end);
+		assert_eq!(alignment.segments.len(), 3);
+		assert_vec3_approx_eq(
+			alignment
+				.segment_control_point(0)
+				.expect("first straight node should exist"),
+			first_end,
+		);
+		assert_vec3_approx_eq(
+			alignment
+				.segment_control_point(1)
+				.expect("second straight node should exist"),
+			second_end,
+		);
 		assert!(matches!(alignment.segments[2], PathSegment::Turn(_)));
 	}
 }
@@ -201,6 +301,9 @@ pub(crate) fn load_alignment() -> AlignmentState {
 	settings.next_alignment_id = settings.next_alignment_id.max(1);
 	// Initialize skipped fields
 	settings.ui_new_alignment_turns = 1;
+	for alignment in settings.alignments.values_mut() {
+		alignment_path::constraints::enforce_alignment_constraints(alignment);
+	}
 	settings
 }
 
