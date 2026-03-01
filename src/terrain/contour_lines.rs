@@ -135,64 +135,36 @@ fn contour_controls_ui(
 	}
 
 	if let Ok(ctx) = contexts.ctx_mut() {
-		egui::Window::new("Contour Lines")
+		egui::Window::new("Contour Settings")
 			.fixed_pos(egui::pos2(8.0, 8.0))
 			.movable(false)
 			.resizable(false)
 			.show(ctx, |ui| {
-				ui.heading("Contour Lines");
+				// Color picker
+				ui.horizontal(|ui| {
+					ui.label("Line Color:");
+					let mut color_array = contour_state.line_color_array();
+					if ui.color_edit_button_rgb(&mut color_array).changed() {
+						contour_state.set_line_color_array(color_array);
+					}
+				});
 
-				// Toggle between contour material and standard material
-				// contour_state.enabled() controls which material is active
-				let material_label = if contour_state.enabled() {
-					"Showing contour lines"
-				} else {
-					"Contour lines off"
-				};
-				ui.label(material_label);
+				// Interval slider
+				ui.horizontal(|ui| {
+					ui.label("Interval:");
+					ui.add(
+						egui::Slider::new(&mut contour_state.settings.interval, 1.0..=200.0).suffix(" units"),
+					);
+				});
 
-				let is_enabled = contour_state.enabled();
-				if ui
-					.button(if is_enabled {
-						"Turn off contour lines"
-					} else {
-						"Turn on contour lines"
-					})
-					.clicked()
-				{
-					contour_state.set_enabled(!is_enabled);
-				}
-				ui.separator();
-
-				if !contour_state.enabled() {
-					ui.label("Contour material is disabled. Enable it above to configure settings.");
-				} else {
-					// Color picker
-					ui.horizontal(|ui| {
-						ui.label("Line Color:");
-						let mut color_array = contour_state.line_color_array();
-						if ui.color_edit_button_rgb(&mut color_array).changed() {
-							contour_state.set_line_color_array(color_array);
-						}
-					});
-
-					// Interval slider
-					ui.horizontal(|ui| {
-						ui.label("Interval:");
-						ui.add(
-							egui::Slider::new(&mut contour_state.settings.interval, 1.0..=200.0).suffix(" units"),
-						);
-					});
-
-					// Thickness slider
-					ui.horizontal(|ui| {
-						ui.label("Thickness:");
-						ui.add(egui::Slider::new(
-							&mut contour_state.settings.line_thickness,
-							0.1..=10.0,
-						));
-					});
-				}
+				// Thickness slider
+				ui.horizontal(|ui| {
+					ui.label("Thickness:");
+					ui.add(egui::Slider::new(
+						&mut contour_state.settings.line_thickness,
+						0.1..=10.0,
+					));
+				});
 			});
 	}
 }

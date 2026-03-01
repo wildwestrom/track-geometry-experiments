@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 
 use crate::alignment::TrackBuildingMode;
+use crate::terrain::ContourState;
 #[cfg(debug_assertions)]
 use crate::debug_frame_limiter::DebugFrameLimiterState;
 
@@ -38,6 +39,7 @@ fn bottom_bar_ui(
 	mut contexts: EguiContexts,
 	mut shell_state: ResMut<UiShellState>,
 	mut track_building_mode: ResMut<TrackBuildingMode>,
+	mut contour_state: ResMut<ContourState>,
 	#[cfg(debug_assertions)] mut frame_limiter: ResMut<DebugFrameLimiterState>,
 ) {
 	let Ok(ctx) = contexts.ctx_mut() else {
@@ -53,7 +55,12 @@ fn bottom_bar_ui(
 				"Terrain",
 				ActivePanel::TerrainControls,
 			);
-			panel_button(ui, &mut shell_state, "Contour", ActivePanel::ContourLines);
+			let contour_enabled = contour_state.enabled();
+			let contour_button = egui::Button::new("Contour").selected(contour_enabled);
+			if ui.add(contour_button).clicked() {
+				contour_state.set_enabled(!contour_enabled);
+				shell_state.active_panel = ActivePanel::ContourLines;
+			}
 			panel_button(
 				ui,
 				&mut shell_state,
