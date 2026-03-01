@@ -6,7 +6,8 @@ use bevy::{
 	},
 	prelude::*,
 };
-use bevy_panorbit_camera::PanOrbitCamera;
+
+use crate::camera::PrimaryCamera3d;
 
 use crate::pin::create_pin;
 use crate::terrain::{self, HeightMap, TerrainMesh, calculate_terrain_height};
@@ -174,7 +175,7 @@ pub(crate) fn place_initial_point(
 	settings: Res<terrain::Settings>,
 	ray_map: Res<RayMap>,
 	mut raycast: MeshRayCast,
-	camera_query: Single<Entity, With<PanOrbitCamera>>,
+	camera_query: Single<Entity, With<PrimaryCamera3d>>,
 	mut egui_contexts: bevy_egui::EguiContexts,
 	existing_draft_pins: Query<Entity, With<DraftAlignmentPin>>,
 ) {
@@ -200,12 +201,9 @@ pub(crate) fn place_initial_point(
 		return;
 	}
 
-	info!("DEBUG: Left click detected in track building mode");
-
 	// Don't place points when clicking on egui UI
 	if let Ok(ctx) = egui_contexts.ctx_mut() {
 		if ctx.wants_pointer_input() || ctx.is_pointer_over_area() {
-			info!("DEBUG: Click blocked by egui");
 			return;
 		}
 	}
@@ -215,35 +213,26 @@ pub(crate) fn place_initial_point(
 	let heightmap = *terrain_heightmap;
 
 	// Find the ray for the mouse pointer
-	info!("DEBUG: Looking for ray, ray_map has {} entries", ray_map.iter().count());
 	let Some(ray) = ray_map
 		.iter()
 		.find(|(ray_id, _)| ray_id.pointer == PointerId::Mouse && ray_id.camera == camera_entity)
 		.map(|(_, ray)| *ray)
 	else {
-		info!("DEBUG: No ray found for mouse pointer");
 		return;
 	};
-
-	info!("DEBUG: Found ray, casting to terrain");
 
 	// Raycast to terrain
 	let filter = |entity: Entity| entity == terrain_entity;
 	let raycast_settings = MeshRayCastSettings::default().with_filter(&filter);
 	let hits = raycast.cast_ray(ray, &raycast_settings);
 
-	info!("DEBUG: Raycast returned {} hits", hits.len());
-
 	let Some(hit_point) = hits
 		.iter()
 		.find(|(entity, _)| *entity == terrain_entity)
 		.map(|(_, hit)| hit.point)
 	else {
-		info!("DEBUG: No terrain hit found");
 		return;
 	};
-
-	info!("DEBUG: Hit terrain at {:?}", hit_point);
 
 	// Calculate proper terrain height at hit point
 	let terrain_height = calculate_terrain_height(hit_point, &heightmap, &settings);
@@ -262,7 +251,6 @@ pub(crate) fn place_initial_point(
 	};
 	let start_color = start_point.get_color();
 
-	info!("DEBUG: Creating draft pin at {:?}", start_position);
 	commands.queue(create_draft_pin(
 		normalized_pos,
 		world_size,

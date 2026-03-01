@@ -1,6 +1,7 @@
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
-use bevy_panorbit_camera::PanOrbitCamera;
+
+use crate::camera::PrimaryCamera3d;
 
 #[derive(Component)]
 struct HudText;
@@ -39,7 +40,7 @@ fn setup_hud(mut commands: Commands) {
 
 fn update_hud(
 	mut hud_text: Single<&mut Text, With<HudText>>,
-	camera_query: Single<(&Transform, &Projection), With<PanOrbitCamera>>,
+	camera_query: Single<(&Transform, &Projection), With<PrimaryCamera3d>>,
 	diagnostics: Res<DiagnosticsStore>,
 ) {
 	let (camera_transform, camera_projection) = *camera_query;

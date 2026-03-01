@@ -247,7 +247,7 @@ fn on_pin_drag_update(
 /// System to scale pins based on their distance from the camera and FOV
 fn scale_pins_by_distance(
 	mut pin_query: Query<&mut Transform, With<Pin>>,
-	camera_query: Single<(&GlobalTransform, &Projection), With<bevy_panorbit_camera::PanOrbitCamera>>,
+	camera_query: Single<(&GlobalTransform, &Projection), With<crate::camera::PrimaryCamera3d>>,
 ) {
 	let (camera_transform, camera_projection) = *camera_query;
 	let camera_pos = camera_transform.translation();

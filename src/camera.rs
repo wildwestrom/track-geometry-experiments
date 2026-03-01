@@ -6,6 +6,11 @@ use std::time::Duration;
 
 use crate::terrain;
 
+/// Marker component for the primary 3D camera used for raycasting and picking.
+/// Use this when you need to query the main camera for terrain interactions.
+#[derive(Component)]
+pub struct PrimaryCamera3d;
+
 pub struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
@@ -32,6 +37,7 @@ fn setup(mut commands: Commands, settings: Res<terrain::Settings>) {
 	let (transform, perspective) = create_perspective_angled_state(world_size + 4206.9); // Just a random value to test its smooth
 
 	commands.spawn((
+		PrimaryCamera3d,
 		transform,
 		Projection::from(perspective),
 		//Camera3d::default(),
@@ -237,7 +243,7 @@ fn toggle_camera(
 	keyboard_input: Res<ButtonInput<KeyCode>>,
 	mut camera_mode: ResMut<CameraMode>,
 	mut commands: Commands,
-	camera_query: Single<(Entity, &Transform, &Projection, &PanOrbitCamera)>,
+	camera_query: Single<(Entity, &Transform, &Projection, &PanOrbitCamera), With<PrimaryCamera3d>>,
 	settings: Res<terrain::Settings>,
 ) {
 	if keyboard_input.just_pressed(KeyCode::KeyT) && !camera_mode.is_transitioning {
@@ -418,7 +424,7 @@ fn cleanup_completed_tweens(
 
 fn disable_camera_during_transition(
 	camera_mode: Res<CameraMode>,
-	mut camera: Single<&mut PanOrbitCamera>,
+	mut camera: Single<&mut PanOrbitCamera, With<PrimaryCamera3d>>,
 ) {
 	if camera_mode.is_camera_transitioning() {
 		camera.enabled = false;
