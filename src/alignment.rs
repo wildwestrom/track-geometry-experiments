@@ -11,7 +11,10 @@ mod ui;
 
 pub(crate) use alignment_path::constraints::{MAX_ARC_RADIUS, MIN_ARC_RADIUS};
 pub(crate) use components::{AlignmentGizmos, configure_gizmos};
-pub(crate) use state::{TrackBuildingMode, load_alignment};
+pub(crate) use state::{
+	MAX_SNAP_ANGLE_DEGREES, MIN_SNAP_ANGLE_DEGREES, TangentSnapSettings, TrackBuildingMode,
+	load_alignment,
+};
 
 pub(crate) const MAX_TURNS: usize = 8;
 pub(crate) const FRAC_PI_180: f64 = PI / 180.;
@@ -27,6 +30,7 @@ impl Plugin for AlignmentPlugin {
 		app
 			.insert_resource(load_alignment())
 			.insert_resource(GeometryDebugLevel(2))
+			.init_resource::<state::TangentSnapSettings>()
 			.init_resource::<TrackBuildingMode>()
 			.init_resource::<state::DraftAlignment>()
 			.init_gizmo_group::<AlignmentGizmos>()

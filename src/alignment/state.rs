@@ -68,18 +68,59 @@ impl AlignmentState {
 	}
 }
 
-const SNAP_TO_TANGENT_DOT_THRESHOLD: f32 = 0.996_194_7; // cos(5deg)
-const SNAP_TO_TANGENT_RELEASE_DOT_THRESHOLD: f32 = 0.978_147_6; // cos(12deg)
+pub(crate) const MIN_SNAP_ANGLE_DEGREES: f32 = 0.1;
+pub(crate) const MAX_SNAP_ANGLE_DEGREES: f32 = 15.0;
+
+#[derive(Resource, Debug, Clone, Copy)]
+pub(crate) struct TangentSnapSettings {
+	/// Entry threshold in degrees when deciding whether to snap to the previous tangent.
+	pub angle_degrees: f32,
+	/// Offset in degrees added to the snap angle to compute the release angle.
+	pub hysteresis_degrees: f32,
+}
+
+impl Default for TangentSnapSettings {
+	fn default() -> Self {
+		Self {
+			angle_degrees: 5.0,
+			hysteresis_degrees: 1.0,
+		}
+	}
+}
+
+impl TangentSnapSettings {
+	pub(crate) fn clamped_angle_degrees(self) -> f32 {
+		self
+			.angle_degrees
+			.clamp(MIN_SNAP_ANGLE_DEGREES, MAX_SNAP_ANGLE_DEGREES)
+	}
+
+	fn entry_dot_threshold(self) -> f32 {
+		self.clamped_angle_degrees().to_radians().cos()
+	}
+
+	/// Keep a hysteresis margin so snap lock does not flicker while the cursor jitters.
+	fn release_dot_threshold(self) -> f32 {
+		let release_angle = (self.clamped_angle_degrees() + self.hysteresis_degrees).clamp(0.0, 30.0);
+		release_angle.to_radians().cos()
+	}
+}
 
 pub(crate) fn snapped_tangent_direction_with_lock(
 	start: Vec3,
 	end: Vec3,
 	previous_tangent: Option<Vec3>,
 	snap_locked: bool,
+	snap_settings: TangentSnapSettings,
 ) -> Option<Vec3> {
 	let previous_tangent = normalize_xz(previous_tangent?)?;
 	let cursor_direction = normalize_xz(end - start)?;
-	if should_snap_to_previous_tangent(previous_tangent, cursor_direction, snap_locked) {
+	if should_snap_to_previous_tangent(
+		previous_tangent,
+		cursor_direction,
+		snap_locked,
+		snap_settings,
+	) {
 		Some(previous_tangent)
 	} else {
 		None
@@ -91,9 +132,10 @@ pub(crate) fn snapped_segment_end_with_lock(
 	end: Vec3,
 	previous_tangent: Option<Vec3>,
 	snap_locked: bool,
+	snap_settings: TangentSnapSettings,
 ) -> (Vec3, bool) {
 	let Some(direction) =
-		snapped_tangent_direction_with_lock(start, end, previous_tangent, snap_locked)
+		snapped_tangent_direction_with_lock(start, end, previous_tangent, snap_locked, snap_settings)
 	else {
 		return (end, false);
 	};
@@ -109,16 +151,22 @@ pub(crate) fn snapped_segment_end_with_lock(
 	)
 }
 
-pub(crate) fn snapped_segment_end(start: Vec3, end: Vec3, previous_tangent: Option<Vec3>) -> Vec3 {
-	snapped_segment_end_with_lock(start, end, previous_tangent, false).0
+pub(crate) fn snapped_segment_end(
+	start: Vec3,
+	end: Vec3,
+	previous_tangent: Option<Vec3>,
+	snap_settings: TangentSnapSettings,
+) -> Vec3 {
+	snapped_segment_end_with_lock(start, end, previous_tangent, false, snap_settings).0
 }
 
 pub(crate) fn build_preview_alignment(
 	start: Vec3,
 	end: Vec3,
 	previous_tangent: Option<Vec3>,
+	snap_settings: TangentSnapSettings,
 ) -> Alignment {
-	let snapped_end = snapped_segment_end(start, end, previous_tangent);
+	let snapped_end = snapped_segment_end(start, end, previous_tangent, snap_settings);
 	if snapped_end.x != end.x || snapped_end.z != end.z {
 		return Alignment::new(start, snapped_end, 0);
 	}
@@ -130,7 +178,7 @@ pub(crate) fn build_preview_alignment(
 		return Alignment::new(start, end, 0);
 	};
 
-	if should_snap_to_previous_tangent(previous_tangent, cursor_direction, false) {
+	if should_snap_to_previous_tangent(previous_tangent, cursor_direction, false, snap_settings) {
 		return Alignment::new(start, end, 0);
 	}
 
@@ -166,8 +214,10 @@ pub(crate) fn extend_alignment_with_preview(
 	segment_start: Vec3,
 	segment_end: Vec3,
 	previous_tangent: Option<Vec3>,
+	snap_settings: TangentSnapSettings,
 ) {
-	let preview = build_preview_alignment(segment_start, segment_end, previous_tangent);
+	let preview =
+		build_preview_alignment(segment_start, segment_end, previous_tangent, snap_settings);
 	let preview_turn = preview.segments.first().and_then(|preview_segment| {
 		if let PathSegment::Turn(turn) = preview_segment {
 			Some(*turn)
@@ -199,11 +249,12 @@ fn should_snap_to_previous_tangent(
 	previous_tangent: Vec3,
 	cursor_direction: Vec3,
 	snap_locked: bool,
+	snap_settings: TangentSnapSettings,
 ) -> bool {
 	let threshold = if snap_locked {
-		SNAP_TO_TANGENT_RELEASE_DOT_THRESHOLD
+		snap_settings.release_dot_threshold()
 	} else {
-		SNAP_TO_TANGENT_DOT_THRESHOLD
+		snap_settings.entry_dot_threshold()
 	};
 	previous_tangent.dot(cursor_direction) >= threshold
 }
@@ -245,7 +296,12 @@ mod tests {
 		let segment_start = Vec3::new(0.0, 0.0, 0.0);
 		let segment_end = Vec3::new(20.0, 0.0, 10.0);
 		let previous_tangent = Some(Vec3::X);
-		let preview = build_preview_alignment(segment_start, segment_end, previous_tangent);
+		let preview = build_preview_alignment(
+			segment_start,
+			segment_end,
+			previous_tangent,
+			TangentSnapSettings::default(),
+		);
 		let preview_vertex = preview
 			.segments
 			.first()
@@ -254,7 +310,13 @@ mod tests {
 			.expect("preview should contain one turn segment");
 
 		let mut alignment = Alignment::new(Vec3::new(-15.0, 0.0, 0.0), segment_start, 0);
-		extend_alignment_with_preview(&mut alignment, segment_start, segment_end, previous_tangent);
+		extend_alignment_with_preview(
+			&mut alignment,
+			segment_start,
+			segment_end,
+			previous_tangent,
+			TangentSnapSettings::default(),
+		);
 
 		assert_eq!(alignment.end, segment_end);
 		assert_eq!(alignment.segments.len(), 2);
@@ -279,7 +341,13 @@ mod tests {
 		let previous_tangent = Some(Vec3::X);
 		let mut alignment = Alignment::new(Vec3::new(-10.0, 0.0, 0.0), segment_start, 0);
 
-		extend_alignment_with_preview(&mut alignment, segment_start, segment_end, previous_tangent);
+		extend_alignment_with_preview(
+			&mut alignment,
+			segment_start,
+			segment_end,
+			previous_tangent,
+			TangentSnapSettings::default(),
+		);
 
 		assert_eq!(alignment.end, segment_end);
 		assert_eq!(alignment.segments.len(), 1);
@@ -296,7 +364,13 @@ mod tests {
 		let mut alignment = Alignment::new(Vec3::new(-10.0, 0.0, 0.0), Vec3::ZERO, 0);
 
 		let first_end = Vec3::new(20.0, 0.0, 0.0);
-		extend_alignment_with_preview(&mut alignment, Vec3::ZERO, first_end, Some(Vec3::X));
+		extend_alignment_with_preview(
+			&mut alignment,
+			Vec3::ZERO,
+			first_end,
+			Some(Vec3::X),
+			TangentSnapSettings::default(),
+		);
 		assert_eq!(alignment.end, first_end);
 		assert_eq!(alignment.segments.len(), 1);
 		assert_vec3_approx_eq(
@@ -307,7 +381,13 @@ mod tests {
 		);
 
 		let second_end = Vec3::new(30.0, 0.0, 15.0);
-		extend_alignment_with_preview(&mut alignment, first_end, second_end, Some(Vec3::X));
+		extend_alignment_with_preview(
+			&mut alignment,
+			first_end,
+			second_end,
+			Some(Vec3::X),
+			TangentSnapSettings::default(),
+		);
 
 		assert_eq!(alignment.end, second_end);
 		assert_eq!(alignment.segments.len(), 3);
@@ -333,7 +413,13 @@ mod tests {
 		let new_end = Vec3::new(40.0, 0.0, 0.0);
 		let mut alignment = Alignment::new(initial_start, initial_end, 0);
 
-		extend_alignment_with_preview(&mut alignment, initial_end, new_end, Some(Vec3::X));
+		extend_alignment_with_preview(
+			&mut alignment,
+			initial_end,
+			new_end,
+			Some(Vec3::X),
+			TangentSnapSettings::default(),
+		);
 
 		assert_eq!(alignment.end, new_end);
 		assert_eq!(alignment.segments.len(), 1);
@@ -353,7 +439,12 @@ mod tests {
 	fn snapped_segment_end_projects_endpoint_onto_previous_tangent() {
 		let start = Vec3::new(10.0, 0.0, 5.0);
 		let raw_end = Vec3::new(35.0, 0.0, 6.0);
-		let snapped_end = snapped_segment_end(start, raw_end, Some(Vec3::X));
+		let snapped_end = snapped_segment_end(
+			start,
+			raw_end,
+			Some(Vec3::X),
+			TangentSnapSettings::default(),
+		);
 
 		assert!((snapped_end.z - start.z).abs() <= 1.0e-4);
 		assert!((snapped_end.x - 35.0).abs() <= 1.0e-4);
@@ -363,8 +454,13 @@ mod tests {
 	fn tangent_snap_lock_keeps_snap_with_small_deviation() {
 		let start = Vec3::ZERO;
 		let slightly_off_axis = Vec3::new(100.0, 0.0, 12.0);
-		let (snapped_end, snapped) =
-			snapped_segment_end_with_lock(start, slightly_off_axis, Some(Vec3::X), true);
+		let (snapped_end, snapped) = snapped_segment_end_with_lock(
+			start,
+			slightly_off_axis,
+			Some(Vec3::X),
+			true,
+			TangentSnapSettings::default(),
+		);
 		assert!(snapped, "snap lock should keep tangent snap active");
 		assert!(snapped_end.z.abs() <= 1.0e-4);
 	}
@@ -373,8 +469,13 @@ mod tests {
 	fn tangent_snap_lock_releases_when_deviation_is_large() {
 		let start = Vec3::ZERO;
 		let far_off_axis = Vec3::new(100.0, 0.0, 40.0);
-		let (snapped_end, snapped) =
-			snapped_segment_end_with_lock(start, far_off_axis, Some(Vec3::X), true);
+		let (snapped_end, snapped) = snapped_segment_end_with_lock(
+			start,
+			far_off_axis,
+			Some(Vec3::X),
+			true,
+			TangentSnapSettings::default(),
+		);
 		assert!(
 			!snapped,
 			"snap lock should release when cursor moves far enough away"
@@ -390,8 +491,20 @@ mod tests {
 		let curve_end = Vec3::new(28.0, 0.0, 8.0);
 		let mut alignment = Alignment::new(initial_start, first_end, 0);
 
-		extend_alignment_with_preview(&mut alignment, first_end, second_end, Some(Vec3::X));
-		extend_alignment_with_preview(&mut alignment, second_end, curve_end, Some(Vec3::X));
+		extend_alignment_with_preview(
+			&mut alignment,
+			first_end,
+			second_end,
+			Some(Vec3::X),
+			TangentSnapSettings::default(),
+		);
+		extend_alignment_with_preview(
+			&mut alignment,
+			second_end,
+			curve_end,
+			Some(Vec3::X),
+			TangentSnapSettings::default(),
+		);
 
 		assert_eq!(alignment.end, curve_end);
 		assert_eq!(alignment.segments.len(), 3);
@@ -418,8 +531,20 @@ mod tests {
 		let curve_end = Vec3::new(28.0, 0.0, 8.0);
 		let mut alignment = Alignment::new(initial_start, first_end, 0);
 
-		extend_alignment_with_preview(&mut alignment, first_end, second_end, Some(Vec3::X));
-		extend_alignment_with_preview(&mut alignment, second_end, curve_end, Some(Vec3::X));
+		extend_alignment_with_preview(
+			&mut alignment,
+			first_end,
+			second_end,
+			Some(Vec3::X),
+			TangentSnapSettings::default(),
+		);
+		extend_alignment_with_preview(
+			&mut alignment,
+			second_end,
+			curve_end,
+			Some(Vec3::X),
+			TangentSnapSettings::default(),
+		);
 
 		let geometry = calculate_alignment_geometry(initial_start, curve_end, &alignment, &FlatSampler);
 		let first_curve = geometry

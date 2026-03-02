@@ -1,7 +1,8 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 
-use crate::alignment::TrackBuildingMode;
+use crate::alignment::{MAX_SNAP_ANGLE_DEGREES, MIN_SNAP_ANGLE_DEGREES};
+use crate::alignment::{TangentSnapSettings, TrackBuildingMode};
 #[cfg(debug_assertions)]
 use crate::debug_frame_limiter::DebugFrameLimiterState;
 use crate::terrain::ContourState;
@@ -10,9 +11,10 @@ pub struct UiShellPlugin;
 
 impl Plugin for UiShellPlugin {
 	fn build(&self, app: &mut App) {
-		app
-			.init_resource::<UiShellState>()
-			.add_systems(bevy_egui::EguiPrimaryContextPass, bottom_bar_ui);
+		app.init_resource::<UiShellState>().add_systems(
+			bevy_egui::EguiPrimaryContextPass,
+			(bottom_bar_ui, settings_ui),
+		);
 		#[cfg(debug_assertions)]
 		app.add_systems(bevy_egui::EguiPrimaryContextPass, frame_limiter_ui);
 	}
@@ -31,6 +33,7 @@ pub enum ActivePanel {
 	ContourLines,
 	AlignmentProperties,
 	Visualizations,
+	Settings,
 	#[cfg(debug_assertions)]
 	FrameRateLimiter,
 }
@@ -73,6 +76,7 @@ fn bottom_bar_ui(
 				"Visualizations",
 				ActivePanel::Visualizations,
 			);
+			panel_button(ui, &mut shell_state, "settings", ActivePanel::Settings);
 
 			#[cfg(debug_assertions)]
 			{
@@ -99,6 +103,49 @@ fn bottom_bar_ui(
 			}
 		});
 	});
+}
+
+fn settings_ui(
+	mut contexts: EguiContexts,
+	ui_shell_state: Res<UiShellState>,
+	mut snap_settings: ResMut<TangentSnapSettings>,
+) {
+	if ui_shell_state.active_panel != ActivePanel::Settings {
+		return;
+	}
+
+	let Ok(ctx) = contexts.ctx_mut() else {
+		return;
+	};
+
+	egui::Window::new("Settings")
+		.fixed_pos(egui::pos2(8.0, 8.0))
+		.movable(false)
+		.resizable(false)
+		.show(ctx, |ui| {
+			egui::Grid::new("settings_grid")
+				.num_columns(2)
+				.spacing(egui::vec2(8.0, 6.0))
+				.show(ui, |ui| {
+					ui.label("Snap angle");
+					ui.add(
+						egui::Slider::new(
+							&mut snap_settings.angle_degrees,
+							MIN_SNAP_ANGLE_DEGREES..=MAX_SNAP_ANGLE_DEGREES,
+						)
+						.step_by(0.1)
+						.suffix(" deg"),
+					);
+					ui.end_row();
+					ui.label("Hysteresis");
+					ui.add(
+						egui::Slider::new(&mut snap_settings.hysteresis_degrees, 0.0..=5.0)
+							.step_by(0.1)
+							.suffix(" deg"),
+					);
+					ui.end_row();
+				});
+		});
 }
 
 #[cfg(debug_assertions)]

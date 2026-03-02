@@ -18,7 +18,7 @@ use terrain::spatial::world_size_for_height;
 
 use super::components::{AlignmentPoint, PointType};
 use super::state::{
-	AlignmentState, DraftAlignment, TrackBuildingMode, alignment_end_tangent,
+	AlignmentState, DraftAlignment, TangentSnapSettings, TrackBuildingMode, alignment_end_tangent,
 	build_preview_alignment, extend_alignment_with_preview, snapped_segment_end_with_lock,
 };
 
@@ -248,6 +248,7 @@ pub(crate) fn update_draft_cursor_pin(
 	terrain_mesh: Single<Entity, With<TerrainMesh>>,
 	terrain_heightmap: Single<&HeightMap>,
 	settings: Res<terrain::Settings>,
+	snap_settings: Res<TangentSnapSettings>,
 	ray_map: Res<RayMap>,
 	mut raycast: MeshRayCast,
 	camera_query: Single<Entity, With<PrimaryCamera3d>>,
@@ -306,6 +307,7 @@ pub(crate) fn update_draft_cursor_pin(
 			raw_cursor_position,
 			draft_alignment.previous_tangent,
 			draft_alignment.tangent_snap_locked,
+			*snap_settings,
 		);
 		draft_alignment.tangent_snap_locked = snap_active;
 		if snap_active && (snapped.x != raw_cursor_position.x || snapped.z != raw_cursor_position.z) {
@@ -524,6 +526,7 @@ pub(crate) fn commit_first_segment(
 	terrain_mesh: Single<Entity, With<TerrainMesh>>,
 	terrain_heightmap: Single<&HeightMap>,
 	settings: Res<terrain::Settings>,
+	snap_settings: Res<TangentSnapSettings>,
 	ray_map: Res<RayMap>,
 	mut raycast: MeshRayCast,
 	camera_query: Single<Entity, With<PrimaryCamera3d>>,
@@ -585,6 +588,7 @@ pub(crate) fn commit_first_segment(
 		raw_end_position,
 		draft_alignment.previous_tangent,
 		draft_alignment.tangent_snap_locked,
+		*snap_settings,
 	);
 	draft_alignment.tangent_snap_locked = snap_active;
 	if end_position.x != raw_end_position.x || end_position.z != raw_end_position.z {
@@ -599,6 +603,7 @@ pub(crate) fn commit_first_segment(
 					start_position,
 					end_position,
 					draft_alignment.previous_tangent,
+					*snap_settings,
 				);
 				(
 					active_alignment_id,
@@ -609,6 +614,7 @@ pub(crate) fn commit_first_segment(
 					start_position,
 					end_position,
 					draft_alignment.previous_tangent,
+					*snap_settings,
 				);
 				path_constraints::enforce_alignment_constraints(&mut new_alignment);
 				let new_alignment_id = alignment_state.next_alignment_id;
@@ -627,6 +633,7 @@ pub(crate) fn commit_first_segment(
 				start_position,
 				end_position,
 				draft_alignment.previous_tangent,
+				*snap_settings,
 			);
 			path_constraints::enforce_alignment_constraints(&mut new_alignment);
 			let new_alignment_id = alignment_state.next_alignment_id;

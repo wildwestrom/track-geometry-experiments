@@ -13,7 +13,7 @@ use crate::terrain::{self, calculate_terrain_height};
 use super::GeometryDebugLevel;
 use super::components::{AlignmentGizmos, AlignmentPoint, PointType};
 use super::state::{
-	AlignmentState, DraftAlignment, TrackBuildingMode, build_preview_alignment,
+	AlignmentState, DraftAlignment, TangentSnapSettings, TrackBuildingMode, build_preview_alignment,
 	snapped_segment_end_with_lock, snapped_tangent_direction_with_lock,
 };
 use crate::terrain::{HeightMap, TerrainMesh};
@@ -45,6 +45,7 @@ pub(crate) fn render_alignment_path(
 	terrain_settings: Res<terrain::Settings>,
 	track_building_mode: Res<TrackBuildingMode>,
 	draft_alignment: Res<DraftAlignment>,
+	snap_settings: Res<TangentSnapSettings>,
 	terrain_mesh: Single<Entity, With<TerrainMesh>>,
 	ray_map: Res<RayMap>,
 	mut raycast: MeshRayCast,
@@ -99,6 +100,7 @@ pub(crate) fn render_alignment_path(
 		cursor_position,
 		draft_alignment.previous_tangent,
 		draft_alignment.tangent_snap_locked,
+		*snap_settings,
 	);
 	if preview_end.x != cursor_position.x || preview_end.z != cursor_position.z {
 		preview_end.y = calculate_terrain_height(preview_end, heightmap, &terrain_settings);
@@ -109,6 +111,7 @@ pub(crate) fn render_alignment_path(
 			cursor_position,
 			draft_alignment.previous_tangent,
 			draft_alignment.tangent_snap_locked,
+			*snap_settings,
 		) {
 		draw_dashed_tangent_ray(
 			&mut gizmos,
@@ -118,8 +121,12 @@ pub(crate) fn render_alignment_path(
 		);
 	}
 
-	let mut preview_alignment =
-		build_preview_alignment(preview_start, preview_end, draft_alignment.previous_tangent);
+	let mut preview_alignment = build_preview_alignment(
+		preview_start,
+		preview_end,
+		draft_alignment.previous_tangent,
+		*snap_settings,
+	);
 	alignment_path::constraints::enforce_alignment_constraints(&mut preview_alignment);
 	draw_alignment_geometry(
 		&mut gizmos,
