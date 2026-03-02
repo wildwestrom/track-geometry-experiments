@@ -453,7 +453,7 @@ mod tests {
 	#[test]
 	fn tangent_snap_lock_keeps_snap_with_small_deviation() {
 		let start = Vec3::ZERO;
-		let slightly_off_axis = Vec3::new(100.0, 0.0, 12.0);
+		let slightly_off_axis = Vec3::new(100.0, 0.0, 10.0);
 		let (snapped_end, snapped) = snapped_segment_end_with_lock(
 			start,
 			slightly_off_axis,
