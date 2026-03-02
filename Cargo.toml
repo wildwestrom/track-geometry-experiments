@@ -18,16 +18,31 @@ categories = ["simulation", "visualization"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [workspace.dependencies]
-bevy = { version = "0.18", default-features = true, features = [
+bevy = { version = "0.18", default-features = false, features = [
+  ### Collections
+  # "dev",
+  # "audio",
+  # "scene",
+  "picking",
+  # "default_app",
+  "default_platform",
+  # "common_api",
+  # "2d_api",
+  # "2d_bevy_render",
+  "3d_api",
+  "3d_bevy_render",
+  # "ui_api",
+  # "ui_bevy_render",
+  # "default_no_std",
   ### non-default-features as of 0.17.3
+  "bevy_gizmos",
   "serialize",
   "shader_format_wesl",
-	"webgpu",
-	"bevy_gizmos"
+  "webgpu",
   ### use during development
-  # "bevy_debug_stepping",
   # "dynamic_linking",
   # "dev",
+  # "bevy_debug_stepping",
 ] }
 bevy_panorbit_camera = { version = "0.34", features = ["bevy_egui"] }
 bevy_egui = "0.39"
