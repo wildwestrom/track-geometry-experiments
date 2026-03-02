@@ -167,8 +167,8 @@ pub(crate) fn update_alignment_pins(
 }
 
 pub(crate) fn update_alignment_from_intermediate_pins(
-	intermediate_pins: Query<
-		(&Transform, &AlignmentPoint),
+	mut intermediate_pins: Query<
+		(&mut Transform, &AlignmentPoint),
 		(Changed<Transform>, Without<DraftAlignmentPin>),
 	>,
 	mut alignment_state: ResMut<AlignmentState>,
@@ -180,7 +180,7 @@ pub(crate) fn update_alignment_from_intermediate_pins(
 
 	let current_id = alignment_state.current_alignment;
 
-	for (transform, intermediate_point) in intermediate_pins.iter() {
+	for (mut transform, intermediate_point) in intermediate_pins.iter_mut() {
 		if intermediate_point.alignment_id != current_id {
 			continue;
 		}
@@ -190,11 +190,17 @@ pub(crate) fn update_alignment_from_intermediate_pins(
 				.alignments
 				.get_mut(&intermediate_point.alignment_id)
 			{
-				if alignment
-					.segment_control_point(segment_index)
-					.is_some_and(|point| point != transform.translation)
-				{
+				let had_control_point = alignment.segment_control_point(segment_index);
+				if had_control_point.is_some_and(|point| {
+					point.distance_squared(transform.translation) > f32::EPSILON
+				}) {
 					alignment.set_segment_control_point(segment_index, transform.translation);
+				}
+				// Keep straight-section pins visually snapped to their tangent span even while dragging.
+				if let Some(snapped_control_point) = alignment.segment_control_point(segment_index) {
+					if snapped_control_point.distance_squared(transform.translation) > f32::EPSILON {
+						transform.translation = snapped_control_point;
+					}
 				}
 			}
 		}
