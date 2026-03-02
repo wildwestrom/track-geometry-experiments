@@ -71,4 +71,4 @@ check:
 	cargo check
 
 run:
-	RUST_BACKTRACE=1 RUST_LOG='bevy=info,track_geometry=debug' cargo run -F bevy/debug,bevy/dynamic_linking,bevy/bevy_dev_tools
+	RUST_BACKTRACE=1 RUST_LOG='bevy=info,track_geometry=debug' cargo run -F bevy/debug,bevy/dynamic_linking,bevy/dev
