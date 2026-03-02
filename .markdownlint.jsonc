@@ -1,0 +1,4 @@
+{
+  // Prefer editor soft-wrap over hard line breaks in prose.
+  "MD013": false
+}
