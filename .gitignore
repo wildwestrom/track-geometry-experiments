@@ -1,4 +1,5 @@
 /target
+/dist
 .cursor
 .devenv
 .direnv
