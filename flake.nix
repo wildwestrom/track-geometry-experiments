@@ -49,6 +49,9 @@
               wayland
               libxkbcommon
 
+              trunk
+              wasm-bindgen-cli
+
               cargo-watch
               cargo-flamegraph
               cargo-machete

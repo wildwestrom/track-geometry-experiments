@@ -191,9 +191,9 @@ pub(crate) fn update_alignment_from_intermediate_pins(
 				.get_mut(&intermediate_point.alignment_id)
 			{
 				let had_control_point = alignment.segment_control_point(segment_index);
-				if had_control_point.is_some_and(|point| {
-					point.distance_squared(transform.translation) > f32::EPSILON
-				}) {
+				if had_control_point
+					.is_some_and(|point| point.distance_squared(transform.translation) > f32::EPSILON)
+				{
 					alignment.set_segment_control_point(segment_index, transform.translation);
 				}
 				// Keep straight-section pins visually snapped to their tangent span even while dragging.

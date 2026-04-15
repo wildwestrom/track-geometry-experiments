@@ -1,10 +1,9 @@
 use bevy::pbr::wireframe::{WireframeConfig, WireframePlugin};
+#[cfg(not(target_arch = "wasm32"))]
+use bevy::render::settings::WgpuFeatures;
 use bevy::{
 	prelude::*,
-	render::{
-		RenderPlugin,
-		settings::{WgpuFeatures, WgpuSettings},
-	},
+	render::{RenderPlugin, settings::WgpuSettings},
 };
 use bevy_egui::EguiPlugin;
 
@@ -29,15 +28,39 @@ use crate::ui_shell::UiShellPlugin;
 const HUD: bool = true;
 
 fn main() {
+	#[cfg(not(target_arch = "wasm32"))]
+	let wgpu_settings = WgpuSettings {
+		features: WgpuFeatures::POLYGON_MODE_LINE,
+		..default()
+	};
+	#[cfg(target_arch = "wasm32")]
+	let wgpu_settings = WgpuSettings::default();
+
 	let mut app = App::new();
 	app
-		.add_plugins(DefaultPlugins.set(RenderPlugin {
-			render_creation: bevy::render::settings::RenderCreation::Automatic(WgpuSettings {
-				features: WgpuFeatures::POLYGON_MODE_LINE,
-				..default()
-			}),
-			..default()
-		}))
+		.add_plugins(
+			DefaultPlugins
+				.set(RenderPlugin {
+					render_creation: bevy::render::settings::RenderCreation::Automatic(
+						wgpu_settings,
+					),
+					..default()
+				})
+				.set(WindowPlugin {
+					primary_window: Some(Window {
+						fit_canvas_to_parent: true,
+						..default()
+					}),
+					..default()
+				})
+				// On WASM, the asset server fetches `.meta` files for every asset.
+				// Since we don't generate them, the server returns an HTML response
+				// that Bevy can't parse, causing assets to silently fail to load.
+				.set(AssetPlugin {
+					meta_check: bevy::asset::AssetMetaCheck::Never,
+					..default()
+				}),
+		)
 		.add_plugins(EguiPlugin::default())
 		.add_plugins(UiShellPlugin)
 		.add_plugins(CameraPlugin)

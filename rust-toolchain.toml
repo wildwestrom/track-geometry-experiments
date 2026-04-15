@@ -1,5 +1,6 @@
 [toolchain]
 channel = "nightly"
+targets = ["wasm32-unknown-unknown", "x86_64-unknown-linux-gnu"]
 components = [
   "rust-src",
   "rust-analyzer",

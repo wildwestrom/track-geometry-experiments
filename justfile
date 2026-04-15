@@ -72,3 +72,9 @@ check:
 
 run:
 	RUST_BACKTRACE=1 RUST_LOG='bevy=info,track_geometry=debug' cargo run -F bevy/debug,bevy/dynamic_linking,bevy/dev
+
+wasm:
+	trunk serve
+
+wasm-build:
+	trunk build
