@@ -23,12 +23,108 @@
 			width: 100%;
 			height: 100%;
 		}
+
+		#loading {
+			position: fixed;
+			inset: 0;
+			background: #000;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			gap: 16px;
+			z-index: 9999;
+			transition: opacity 0.4s ease;
+		}
+
+		#loading.fade-out {
+			opacity: 0;
+			pointer-events: none;
+		}
+
+		#loading-label {
+			color: #888;
+			font-family: monospace;
+			font-size: 13px;
+			letter-spacing: 0.1em;
+		}
+
+		#loading-track {
+			width: 240px;
+			height: 3px;
+			background: #222;
+			border-radius: 2px;
+			overflow: hidden;
+		}
+
+		#loading-bar {
+			height: 100%;
+			width: 0%;
+			background: #fff;
+			border-radius: 2px;
+			transition: width 0.2s ease;
+		}
 	</style>
 </head>
 
 <body>
+	<div id="loading">
+		<div id="loading-label">loading...</div>
+		<div id="loading-track"><div id="loading-bar"></div></div>
+	</div>
+
 	<link data-trunk rel="rust" data-wasm-opt="z" data-cargo-profile="wasm-release" />
 	<link data-trunk rel="copy-dir" href="assets" />
+
+	<script>
+		const bar = document.getElementById('loading-bar');
+		const overlay = document.getElementById('loading');
+		let dlProgress = 0;
+
+		function setProgress(p) {
+			bar.style.width = (p * 100).toFixed(1) + '%';
+		}
+
+		// Intercept fetch to track .wasm download (0–85%)
+		const origFetch = window.fetch;
+		window.fetch = async function(input, init) {
+			const url = typeof input === 'string' ? input : (input && input.url);
+			const isWasm = url && url.endsWith('.wasm');
+			const response = await origFetch(input, init);
+			if (!isWasm) return response;
+
+			const total = parseInt(response.headers.get('content-length') || '0');
+			let loaded = 0;
+			const reader = response.body.getReader();
+			const chunks = [];
+
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				chunks.push(value);
+				loaded += value.length;
+				dlProgress = total ? (loaded / total) * 0.85 : Math.min(dlProgress + 0.02, 0.84);
+				setProgress(dlProgress);
+			}
+
+			const blob = new Blob(chunks);
+			return new Response(blob, { status: response.status, statusText: response.statusText, headers: response.headers });
+		};
+
+		// Watch for canvas — Rust creates it when WASM init completes
+		setProgress(0.02); // show tiny bit immediately
+		const observer = new MutationObserver(() => {
+			if (document.querySelector('canvas')) {
+				observer.disconnect();
+				setProgress(1);
+				setTimeout(() => {
+					overlay.classList.add('fade-out');
+					setTimeout(() => overlay.remove(), 450);
+				}, 150);
+			}
+		});
+		observer.observe(document.body, { childList: true, subtree: true });
+	</script>
 </body>
 
 </html>
