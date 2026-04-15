@@ -1,5 +1,7 @@
 # Track Geometry Experiments
 
+[![Static Badge](https://img.shields.io/badge/Load_Demo-brightgreen?style=for-the-badge&logo=webassembly&labelColor=white)](https://wildwestrom.github.io/track-geometry-experiments/)
+
 A playground for visualizing and optimizing railway alignments using Bevy, featuring interactive terrain visualization, draggable control points, and alignment constraint enforcement.
 
 > [!WARNING]
