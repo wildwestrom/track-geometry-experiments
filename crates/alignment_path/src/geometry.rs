@@ -166,7 +166,7 @@ pub struct CurveSegment {
 #[derive(Clone, Copy)]
 pub struct ClothoidParameters {
 	pub endpoint: Vec3,
-	pub length: f64,
+	pub circular_arc_length: f64,
 	pub beta: f64,
 	pub fresnel_scale: f64,
 	pub fresnel_scale_sign: f64,
@@ -178,7 +178,7 @@ impl ClothoidParameters {
 		clothoid_point(
 			self.s_multiplier * f64::from(s),
 			self.endpoint,
-			self.length,
+			self.circular_arc_length,
 			self.beta,
 			self.fresnel_scale,
 			self.fresnel_scale_sign,
@@ -337,7 +337,7 @@ fn compute_turn_geometry<H: HeightSampler>(
 	let ingoing_beta = f64::from(unit_vector_i.z.atan2(unit_vector_i.x));
 	let ingoing_clothoid = ClothoidParameters {
 		endpoint: ingoing_clothoid_start_point,
-		length: l_c_abs,
+		circular_arc_length: l_c_abs,
 		beta: ingoing_beta,
 		fresnel_scale,
 		fresnel_scale_sign,
@@ -384,7 +384,7 @@ fn compute_turn_geometry<H: HeightSampler>(
 	let outgoing_beta = f64::from(unit_vector_i_plus_1.z.atan2(unit_vector_i_plus_1.x));
 	let outgoing_clothoid = ClothoidParameters {
 		endpoint: clothoid_transition_end,
-		length: l_c_abs,
+		circular_arc_length: l_c_abs,
 		beta: outgoing_beta,
 		fresnel_scale,
 		fresnel_scale_sign: -fresnel_scale_sign,
