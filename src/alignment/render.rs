@@ -1,4 +1,7 @@
-use alignment_path::{CurveSegment, GeometrySegment, HeightSampler, calculate_alignment_geometry};
+use alignment_path::{
+	CurveSegment, ElevationProfile as _, GeometrySegment, HeightSampler, TerrainSampledProfile,
+	calculate_alignment_geometry,
+};
 use bevy::color::palettes::css::*;
 use bevy::picking::{
 	backend::ray::RayMap,
@@ -172,7 +175,11 @@ fn draw_alignment_geometry<H: HeightSampler>(
 	geometry_debug_level: u8,
 	sampler: &H,
 ) {
-	let alignment_geometry = calculate_alignment_geometry(start, end, alignment, sampler);
+	let alignment_geometry = calculate_alignment_geometry(start, end, alignment);
+	let profile = TerrainSampledProfile {
+		sampler,
+		horizontal: &alignment_geometry,
+	};
 
 	// Degenerate fallback when the geometry pipeline has no drawable pieces.
 	if alignment_geometry.segments.is_empty() && geometry_debug_level >= 1 {
@@ -183,7 +190,11 @@ fn draw_alignment_geometry<H: HeightSampler>(
 	for segment in alignment_geometry.segments.iter() {
 		if let GeometrySegment::Straight(straight) = segment {
 			if geometry_debug_level >= 1 {
-				gizmos.line(straight.start, straight.end, AQUA);
+				let y_start = profile.elevation_at(straight.start_station);
+				let y_end = profile.elevation_at(straight.start_station + straight.length);
+				let p0 = straight.point_at(0.0, y_start);
+				let p1 = straight.point_at(1.0, y_end);
+				gizmos.line(p0, p1, AQUA);
 			}
 			continue;
 		}
@@ -204,12 +215,21 @@ fn draw_alignment_geometry<H: HeightSampler>(
 		}
 
 		let ingoing_params = segment.ingoing_clothoid;
-		let ingoing_clothoid = FunctionCurve::new(Interval::UNIT, move |s| ingoing_params.point_at(s));
+		let profile_ref = &profile;
+		let ingoing_clothoid = FunctionCurve::new(Interval::UNIT, move |s| {
+			let y = profile_ref.elevation_at(ingoing_params.station_at(s));
+			ingoing_params.point_at(s, y)
+		});
 		draw_ingoing_clothoid(gizmos, ingoing_clothoid);
 
 		if geometry_debug_level >= 1 {
 			let arc_geometry = segment.circular_arc;
-			let arc_function = FunctionCurve::new(Interval::UNIT, move |s| arc_geometry.point_at(s));
+			let profile_ref = &profile;
+			let arc_function = FunctionCurve::new(Interval::UNIT, move |s| {
+				let station = arc_geometry.start_station + s * arc_geometry.length;
+				let y = profile_ref.elevation_at(station);
+				arc_geometry.point_at(s, y)
+			});
 
 			gizmos.curve_3d(
 				arc_function,
@@ -237,8 +257,11 @@ fn draw_alignment_geometry<H: HeightSampler>(
 		}
 
 		let outgoing_params = segment.outgoing_clothoid;
-		let outgoing_clothoid =
-			FunctionCurve::new(Interval::UNIT, move |s| outgoing_params.point_at(s));
+		let profile_ref = &profile;
+		let outgoing_clothoid = FunctionCurve::new(Interval::UNIT, move |s| {
+			let y = profile_ref.elevation_at(outgoing_params.station_at(s));
+			outgoing_params.point_at(s, y)
+		});
 		draw_outgoint_clothoid(gizmos, outgoing_clothoid);
 	}
 }

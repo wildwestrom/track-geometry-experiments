@@ -41,9 +41,7 @@ fn main() {
 		.add_plugins(
 			DefaultPlugins
 				.set(RenderPlugin {
-					render_creation: bevy::render::settings::RenderCreation::Automatic(
-						wgpu_settings,
-					),
+					render_creation: bevy::render::settings::RenderCreation::Automatic(wgpu_settings),
 					..default()
 				})
 				.set(WindowPlugin {

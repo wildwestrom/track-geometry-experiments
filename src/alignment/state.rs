@@ -273,15 +273,7 @@ fn configure_preview_turn_tangent_consumption(turn: Option<&mut alignment_path::
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use alignment_path::{GeometrySegment, HeightSampler, calculate_alignment_geometry};
-
-	struct FlatSampler;
-
-	impl HeightSampler for FlatSampler {
-		fn height_at(&self, position: Vec3) -> f32 {
-			position.y
-		}
-	}
+	use alignment_path::{GeometrySegment, calculate_alignment_geometry};
 
 	fn assert_vec3_approx_eq(actual: Vec3, expected: Vec3) {
 		let delta = actual.distance(expected);
@@ -546,7 +538,7 @@ mod tests {
 			TangentSnapSettings::default(),
 		);
 
-		let geometry = calculate_alignment_geometry(initial_start, curve_end, &alignment, &FlatSampler);
+		let geometry = calculate_alignment_geometry(initial_start, curve_end, &alignment);
 		let first_curve = geometry
 			.segments
 			.iter()

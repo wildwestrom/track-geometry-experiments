@@ -9,3 +9,6 @@ license = "MIT OR Apache-2.0"
 glam = { workspace = true }
 serde = { workspace = true }
 spec_math = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

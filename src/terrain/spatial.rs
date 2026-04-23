@@ -1,21 +1,6 @@
 use super::Settings;
 use bevy::prelude::*;
 
-/// Convert world coordinates to grid coordinates
-pub fn world_to_grid(world_pos: Vec3, settings: &Settings) -> (u32, u32) {
-	let world_x = settings.world_x();
-	let world_z = settings.world_z();
-	let grid_x = settings.grid_x();
-	let grid_z = settings.grid_z();
-
-	let grid_x_f = (world_pos.x + world_x / 2.0) / world_x * grid_x as f32;
-	let grid_z_f = (world_pos.z + world_z / 2.0) / world_z * grid_z as f32;
-
-	let grid_x_clamped = (grid_x_f as u32).min(grid_x.saturating_sub(1));
-	let grid_z_clamped = (grid_z_f as u32).min(grid_z.saturating_sub(1));
-
-	(grid_x_clamped, grid_z_clamped)
-}
 
 /// Convert grid coordinates to world coordinates
 pub fn grid_to_world(grid_x: u32, grid_z: u32, settings: &Settings) -> Vec3 {
@@ -33,14 +18,35 @@ pub fn grid_to_world(grid_x: u32, grid_z: u32, settings: &Settings) -> Vec3 {
 	Vec3::new(x_pos, 0.0, z_pos)
 }
 
-/// Calculate terrain height at given world coordinates
+/// Calculate terrain height at given world coordinates using bilinear interpolation.
 pub fn calculate_terrain_height(
 	world_pos: Vec3,
 	heightmap: &super::HeightMap,
 	settings: &Settings,
 ) -> f32 {
-	let (grid_x, grid_z) = world_to_grid(world_pos, settings);
-	let base_height = heightmap.get(grid_x, grid_z);
+	let world_x = settings.world_x();
+	let world_z = settings.world_z();
+	let grid_x = settings.grid_x();
+	let grid_z = settings.grid_z();
+
+	let gx_f = (world_pos.x + world_x / 2.0) / world_x * grid_x as f32;
+	let gz_f = (world_pos.z + world_z / 2.0) / world_z * grid_z as f32;
+
+	let x0 = (gx_f.floor() as u32).min(grid_x.saturating_sub(1));
+	let z0 = (gz_f.floor() as u32).min(grid_z.saturating_sub(1));
+	let x1 = (x0 + 1).min(grid_x.saturating_sub(1));
+	let z1 = (z0 + 1).min(grid_z.saturating_sub(1));
+
+	let tx = gx_f.fract();
+	let tz = gz_f.fract();
+
+	let h00 = heightmap.get(x0, z0);
+	let h10 = heightmap.get(x1, z0);
+	let h01 = heightmap.get(x0, z1);
+	let h11 = heightmap.get(x1, z1);
+
+	let base_height = (h00 * (1.0 - tx) + h10 * tx) * (1.0 - tz)
+		+ (h01 * (1.0 - tx) + h11 * tx) * tz;
 
 	base_height * world_size_for_height(settings) * settings.height_multiplier
 }

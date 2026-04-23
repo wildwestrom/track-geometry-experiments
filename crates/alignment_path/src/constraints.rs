@@ -246,6 +246,7 @@ mod tests {
 			start: Vec3::new(0.0, 0.0, 0.0),
 			end: Vec3::new(10.0, 0.0, 0.0),
 			segments: vec![PathSegment::Straight(StraightSegment::from_fraction(0.5))],
+			..Default::default()
 		};
 		if let Some(straight) = alignment.segments[0].as_straight_mut() {
 			straight.fraction = 1.25;
@@ -270,6 +271,7 @@ mod tests {
 				PathSegment::Straight(StraightSegment::from_fraction(0.8)),
 				PathSegment::Straight(StraightSegment::from_fraction(0.2)),
 			],
+			..Default::default()
 		};
 
 		enforce_alignment_constraints(&mut alignment);

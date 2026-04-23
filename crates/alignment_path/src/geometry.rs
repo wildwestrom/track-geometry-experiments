@@ -1,6 +1,6 @@
 use std::f64::consts::PI;
 
-use glam::{Quat, Vec3};
+use glam::{Quat, Vec2, Vec3};
 use spec_math::Fresnel;
 
 use crate::path::{Alignment, TurnSegment};
@@ -137,16 +137,72 @@ pub struct AlignmentGeometry {
 	pub segments: Vec<GeometrySegment>,
 }
 
+impl AlignmentGeometry {
+	pub fn total_length(&self) -> f32 {
+		self.segments.iter().map(GeometrySegment::length).sum()
+	}
+
+	pub fn xz_at_station(&self, station: f32) -> Option<Vec2> {
+		self
+			.segments
+			.iter()
+			.find_map(|segment| segment.xz_at_station(station))
+	}
+}
+
 #[derive(Clone, Copy)]
 pub enum GeometrySegment {
 	Straight(StraightGeometry),
 	Turn(CurveSegment),
 }
 
+impl GeometrySegment {
+	pub fn start_station(&self) -> f32 {
+		match self {
+			Self::Straight(s) => s.start_station,
+			Self::Turn(t) => t.start_station,
+		}
+	}
+
+	pub fn length(&self) -> f32 {
+		match self {
+			Self::Straight(s) => s.length,
+			Self::Turn(t) => t.length(),
+		}
+	}
+
+	pub fn xz_at_station(&self, station: f32) -> Option<Vec2> {
+		match self {
+			Self::Straight(s) => s.xz_at_station(station),
+			Self::Turn(t) => t.xz_at_station(station),
+		}
+	}
+}
+
 #[derive(Clone, Copy)]
 pub struct StraightGeometry {
 	pub start: Vec3,
 	pub end: Vec3,
+	pub start_station: f32,
+	pub length: f32,
+}
+
+impl StraightGeometry {
+	pub fn xz_at(&self, s: f32) -> Vec2 {
+		let start = Vec2::new(self.start.x, self.start.z);
+		let end = Vec2::new(self.end.x, self.end.z);
+		start.lerp(end, s)
+	}
+
+	pub fn point_at(&self, s: f32, y: f32) -> Vec3 {
+		let xz = self.xz_at(s);
+		Vec3::new(xz.x, y, xz.y)
+	}
+
+	pub fn xz_at_station(&self, station: f32) -> Option<Vec2> {
+		let s = local_s_for_station(station, self.start_station, self.length)?;
+		Some(self.xz_at(s))
+	}
 }
 
 #[derive(Clone, Copy)]
@@ -161,6 +217,21 @@ pub struct CurveSegment {
 	pub outgoing_clothoid: ClothoidParameters,
 	pub azimuth_of_tangent: f32,
 	pub difference_in_azimuth: f32,
+	pub start_station: f32,
+}
+
+impl CurveSegment {
+	pub fn length(&self) -> f32 {
+		self.ingoing_clothoid.length + self.circular_arc.length + self.outgoing_clothoid.length
+	}
+
+	pub fn xz_at_station(&self, station: f32) -> Option<Vec2> {
+		self
+			.ingoing_clothoid
+			.xz_at_station(station)
+			.or_else(|| self.circular_arc.xz_at_station(station))
+			.or_else(|| self.outgoing_clothoid.xz_at_station(station))
+	}
 }
 
 #[derive(Clone, Copy)]
@@ -171,18 +242,46 @@ pub struct ClothoidParameters {
 	pub fresnel_scale: f64,
 	pub fresnel_scale_sign: f64,
 	pub s_multiplier: f64,
+	pub length: f32,
+	pub station_at_s0: f32,
+	pub station_at_s1: f32,
 }
 
 impl ClothoidParameters {
-	pub fn point_at(&self, s: f32) -> Vec3 {
-		clothoid_point(
+	pub fn xz_at(&self, s: f32) -> Vec2 {
+		let point = clothoid_point(
 			self.s_multiplier * f64::from(s),
 			self.endpoint,
 			self.circular_arc_length,
 			self.beta,
 			self.fresnel_scale,
 			self.fresnel_scale_sign,
-		)
+		);
+		Vec2::new(point.x, point.z)
+	}
+
+	pub fn point_at(&self, s: f32, y: f32) -> Vec3 {
+		let xz = self.xz_at(s);
+		Vec3::new(xz.x, y, xz.y)
+	}
+
+	pub fn station_at(&self, s: f32) -> f32 {
+		self.station_at_s0 * (1.0 - s) + self.station_at_s1 * s
+	}
+
+	pub fn xz_at_station(&self, station: f32) -> Option<Vec2> {
+		let lo = self.station_at_s0.min(self.station_at_s1);
+		let hi = self.station_at_s0.max(self.station_at_s1);
+		if !(lo..=hi).contains(&station) {
+			return None;
+		}
+		let span = self.station_at_s1 - self.station_at_s0;
+		let s = if span.abs() < f32::EPSILON {
+			0.0
+		} else {
+			(station - self.station_at_s0) / span
+		};
+		Some(self.xz_at(s.clamp(0.0, 1.0)))
 	}
 }
 
@@ -192,27 +291,45 @@ pub struct CircularArcGeometry {
 	pub center: Vec3,
 	pub start_vector: Vec3,
 	pub arc_sweep: f32,
-	pub start_elevation: f32,
 	pub end_point: Vec3,
-	pub end_elevation: f32,
+	pub start_station: f32,
+	pub length: f32,
 }
 
 impl CircularArcGeometry {
-	pub fn point_at(&self, s: f32) -> Vec3 {
+	pub fn xz_at(&self, s: f32) -> Vec2 {
 		let sweep_angle = self.arc_sweep * s;
 		let rotation = Quat::from_axis_angle(Vec3::Y, sweep_angle);
 		let rotated_vector = rotation * self.start_vector;
 		let xz_position = self.center + rotated_vector;
-		let interpolated_y = self.start_elevation * (1.0 - s) + self.end_elevation * s;
-		Vec3::new(xz_position.x, interpolated_y, xz_position.z)
+		Vec2::new(xz_position.x, xz_position.z)
+	}
+
+	pub fn point_at(&self, s: f32, y: f32) -> Vec3 {
+		let xz = self.xz_at(s);
+		Vec3::new(xz.x, y, xz.y)
+	}
+
+	pub fn xz_at_station(&self, station: f32) -> Option<Vec2> {
+		let s = local_s_for_station(station, self.start_station, self.length)?;
+		Some(self.xz_at(s))
 	}
 }
 
-pub fn calculate_alignment_geometry<H: HeightSampler>(
+fn local_s_for_station(station: f32, start_station: f32, length: f32) -> Option<f32> {
+	if length <= 0.0 {
+		return None;
+	}
+	if !(start_station..=start_station + length).contains(&station) {
+		return None;
+	}
+	Some(((station - start_station) / length).clamp(0.0, 1.0))
+}
+
+pub fn calculate_alignment_geometry(
 	start: Vec3,
 	end: Vec3,
 	alignment: &Alignment,
-	height_sampler: &H,
 ) -> AlignmentGeometry {
 	assert!(start.is_finite(), "start vertex must be finite: {start}");
 	assert!(end.is_finite(), "end vertex must be finite: {end}");
@@ -247,14 +364,13 @@ pub fn calculate_alignment_geometry<H: HeightSampler>(
 		let previous = control_points[i];
 		let tangent_vertex = control_points[i + 1];
 		let next = control_points[i + 2];
-		if let Some(turn_geometry) =
-			compute_turn_geometry(previous, tangent_vertex, next, turn, height_sampler)
-		{
+		if let Some(turn_geometry) = compute_turn_geometry(previous, tangent_vertex, next, turn) {
 			turn_geometry_by_control_point[i + 1] = Some(turn_geometry);
 		}
 	}
 
 	let mut segments = Vec::new();
+	let mut station = 0.0_f32;
 	for edge_idx in 0..control_points.len().saturating_sub(1) {
 		let left_cp = control_points[edge_idx];
 		let right_cp = control_points[edge_idx + 1];
@@ -267,13 +383,23 @@ pub fn calculate_alignment_geometry<H: HeightSampler>(
 			.unwrap_or(right_cp);
 
 		if straight_start.distance_squared(straight_end) > f32::EPSILON {
+			let length = Vec2::new(
+				straight_end.x - straight_start.x,
+				straight_end.z - straight_start.z,
+			)
+			.length();
 			segments.push(GeometrySegment::Straight(StraightGeometry {
 				start: straight_start,
 				end: straight_end,
+				start_station: station,
+				length,
 			}));
+			station += length;
 		}
 
-		if let Some(turn_geometry) = turn_geometry_by_control_point[edge_idx + 1] {
+		if let Some(mut turn_geometry) = turn_geometry_by_control_point[edge_idx + 1] {
+			assign_turn_stations(&mut turn_geometry, station);
+			station += turn_geometry.length();
 			segments.push(GeometrySegment::Turn(turn_geometry));
 		}
 	}
@@ -281,12 +407,29 @@ pub fn calculate_alignment_geometry<H: HeightSampler>(
 	AlignmentGeometry { segments }
 }
 
-fn compute_turn_geometry<H: HeightSampler>(
+fn assign_turn_stations(turn: &mut CurveSegment, start_station: f32) {
+	turn.start_station = start_station;
+
+	let ingoing_length = turn.ingoing_clothoid.length;
+	turn.ingoing_clothoid.station_at_s0 = start_station;
+	turn.ingoing_clothoid.station_at_s1 = start_station + ingoing_length;
+
+	let arc_start = start_station + ingoing_length;
+	turn.circular_arc.start_station = arc_start;
+	let arc_end = arc_start + turn.circular_arc.length;
+
+	let outgoing_length = turn.outgoing_clothoid.length;
+	// outgoing_clothoid.point_at(s=0) is at the outgoing tangent endpoint (far from arc),
+	// which is the later station in traversal order; s=1 is at arc end.
+	turn.outgoing_clothoid.station_at_s0 = arc_end + outgoing_length;
+	turn.outgoing_clothoid.station_at_s1 = arc_end;
+}
+
+fn compute_turn_geometry(
 	tangent_vertex_i_minus_1: Vec3,
 	tangent_vertex_i: Vec3,
 	tangent_vertex_i_plus_1: Vec3,
 	turn: &TurnSegment,
-	height_sampler: &H,
 ) -> Option<CurveSegment> {
 	let circular_arc_radius_i = turn.circular_section_radius;
 	let circular_arc_angle_i = turn.circular_section_angle;
@@ -323,6 +466,8 @@ fn compute_turn_geometry<H: HeightSampler>(
 
 	let r_i_abs = f64::from(circular_arc_radius_i.abs());
 	let l_c_abs = f64::from(length_of_circular_section.abs());
+	let clothoid_length = length_of_circular_section.abs();
+	let arc_length = circular_arc_radius_i.abs() * circular_arc_angle_i.abs();
 
 	let cross_y = unit_vector_i.x.mul_add(
 		unit_vector_i_plus_1.z,
@@ -342,6 +487,9 @@ fn compute_turn_geometry<H: HeightSampler>(
 		fresnel_scale,
 		fresnel_scale_sign,
 		s_multiplier: 1.0,
+		length: clothoid_length,
+		station_at_s0: 0.0,
+		station_at_s1: 0.0,
 	};
 
 	let circular_arc_start = circular_arc_start(
@@ -361,12 +509,9 @@ fn compute_turn_geometry<H: HeightSampler>(
 	let start_vector = circular_arc_start - circular_arc_center;
 
 	let arc_sweep = -lambda_i.signum() as f32 * circular_arc_angle_i;
-	let arc_end_point = {
-		let start_vector_from_center = start_vector;
+	let arc_end_xz = {
 		let rotation = Quat::from_axis_angle(Vec3::Y, arc_sweep);
-		let xz_pos = circular_arc_center + rotation * start_vector_from_center;
-		let y_pos = height_sampler.height_at(xz_pos);
-		Vec3::new(xz_pos.x, y_pos, xz_pos.z)
+		circular_arc_center + rotation * start_vector
 	};
 
 	let circular_arc = CircularArcGeometry {
@@ -374,9 +519,9 @@ fn compute_turn_geometry<H: HeightSampler>(
 		center: circular_arc_center,
 		start_vector,
 		arc_sweep,
-		start_elevation: circular_arc_start.y,
-		end_point: arc_end_point,
-		end_elevation: arc_end_point.y,
+		end_point: arc_end_xz,
+		start_station: 0.0,
+		length: arc_length,
 	};
 
 	let clothoid_transition_end = tangent_vertex_i + total_tangent_length_i * unit_vector_i_plus_1;
@@ -389,6 +534,9 @@ fn compute_turn_geometry<H: HeightSampler>(
 		fresnel_scale,
 		fresnel_scale_sign: -fresnel_scale_sign,
 		s_multiplier: -1.0,
+		length: clothoid_length,
+		station_at_s0: 0.0,
+		station_at_s1: 0.0,
 	};
 
 	Some(CurveSegment {
@@ -402,5 +550,107 @@ fn compute_turn_geometry<H: HeightSampler>(
 		outgoing_clothoid,
 		azimuth_of_tangent: azimuth_of_tangent_i,
 		difference_in_azimuth: difference_in_azimuth_i,
+		start_station: 0.0,
 	})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::path::{Alignment, TurnSegment};
+
+	#[test]
+	fn straight_length_matches_xz_distance() {
+		let straight = StraightGeometry {
+			start: Vec3::new(0.0, 5.0, 0.0),
+			end: Vec3::new(30.0, 10.0, 40.0),
+			start_station: 0.0,
+			length: 50.0,
+		};
+		let xz_dist = Vec2::new(30.0, 40.0).length();
+		assert!((straight.length - xz_dist).abs() < 1.0);
+	}
+
+	#[test]
+	fn arc_length_matches_radius_times_sweep() {
+		let arc = CircularArcGeometry {
+			start_point: Vec3::ZERO,
+			center: Vec3::new(100.0, 0.0, 0.0),
+			start_vector: Vec3::new(-100.0, 0.0, 0.0),
+			arc_sweep: 0.5,
+			end_point: Vec3::ZERO,
+			start_station: 0.0,
+			length: 50.0,
+		};
+		assert!((arc.length - 100.0_f32 * 0.5_f32).abs() < 1e-3);
+	}
+
+	#[test]
+	fn station_accumulates_monotonically() {
+		let alignment = Alignment::new(
+			Vec3::new(0.0, 0.0, 0.0),
+			Vec3::new(200.0, 0.0, 0.0),
+			1,
+		);
+		let geometry = calculate_alignment_geometry(
+			alignment.start,
+			alignment.end,
+			&alignment,
+		);
+
+		let mut prev_end = 0.0_f32;
+		for segment in &geometry.segments {
+			let start = segment.start_station();
+			let len = segment.length();
+			assert!(
+				(start - prev_end).abs() < 1e-2,
+				"station gap: prev_end={prev_end}, start={start}",
+			);
+			assert!(len >= 0.0, "negative segment length: {len}");
+			prev_end = start + len;
+		}
+	}
+
+	#[test]
+	fn total_length_matches_segment_sum() {
+		let alignment = Alignment::new(
+			Vec3::new(0.0, 0.0, 0.0),
+			Vec3::new(200.0, 0.0, 200.0),
+			1,
+		);
+		let geometry = calculate_alignment_geometry(
+			alignment.start,
+			alignment.end,
+			&alignment,
+		);
+		let sum: f32 = geometry.segments.iter().map(GeometrySegment::length).sum();
+		assert!((geometry.total_length() - sum).abs() < 1e-3);
+	}
+
+	#[test]
+	fn clothoid_length_matches_computed_length() {
+		let alignment = Alignment {
+			start: Vec3::new(0.0, 0.0, 0.0),
+			end: Vec3::new(300.0, 0.0, 0.0),
+			segments: vec![crate::path::PathSegment::Turn(TurnSegment {
+				tangent_vertex: Vec3::new(150.0, 0.0, 50.0),
+				circular_section_radius: 100.0,
+				circular_section_angle: 0.3,
+			})],
+			..Default::default()
+		};
+		let geometry = calculate_alignment_geometry(
+			alignment.start,
+			alignment.end,
+			&alignment,
+		);
+		for segment in &geometry.segments {
+			if let GeometrySegment::Turn(turn) = segment {
+				let in_len = turn.ingoing_clothoid.length;
+				let out_len = turn.outgoing_clothoid.length;
+				assert_eq!(in_len, out_len, "clothoid lengths should be symmetric");
+				assert!(in_len > 0.0, "clothoid length must be positive");
+			}
+		}
+	}
 }

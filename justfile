@@ -41,6 +41,10 @@ clippy_args := """
 lint-check:
 	cargo clippy -- {{clippy_args}}
 
+# clippy lint script for LLMs
+lint-check-short:
+	cargo clippy --message-format short -- {{clippy_args}}
+
 lint-fix:
 	cargo clippy --allow-dirty --allow-staged --fix -- {{clippy_args}}
 

@@ -1,6 +1,8 @@
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
 
+use crate::elevation::VerticalProfileData;
+
 const DEFAULT_STRAIGHT_FRACTION: f32 = 0.5;
 const STRAIGHT_FRACTION_EPSILON: f32 = 1.0e-4;
 
@@ -10,6 +12,8 @@ pub struct Alignment {
 	pub end: Vec3,
 	#[serde(default)]
 	pub segments: Vec<PathSegment>,
+	#[serde(default)]
+	pub vertical_profile: VerticalProfileData,
 }
 
 impl Default for Alignment {
@@ -18,6 +22,7 @@ impl Default for Alignment {
 			start: Vec3::ZERO,
 			end: Vec3::ZERO,
 			segments: Vec::new(),
+			vertical_profile: VerticalProfileData::default(),
 		}
 	}
 }
@@ -36,6 +41,7 @@ impl Alignment {
 			start,
 			end,
 			segments,
+			vertical_profile: VerticalProfileData::default(),
 		}
 	}
 
