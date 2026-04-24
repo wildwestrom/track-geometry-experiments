@@ -1,6 +1,6 @@
 use alignment_path::{
-	CurveSegment, ElevationProfile as _, GeometrySegment, HeightSampler, TerrainSampledProfile,
-	calculate_alignment_geometry,
+	CurveSegment, ElevationProfile, GeometrySegment, HeightSampler, TerrainSampledProfile,
+	VerticalProfileData, calculate_alignment_geometry,
 };
 use bevy::color::palettes::css::*;
 use bevy::picking::{
@@ -176,9 +176,16 @@ fn draw_alignment_geometry<H: HeightSampler>(
 	sampler: &H,
 ) {
 	let alignment_geometry = calculate_alignment_geometry(start, end, alignment);
-	let profile = TerrainSampledProfile {
-		sampler,
-		horizontal: &alignment_geometry,
+	let terrain_profile;
+	let profile: &dyn ElevationProfile = match &alignment.vertical_profile {
+		VerticalProfileData::TerrainSampled => {
+			terrain_profile = TerrainSampledProfile {
+				sampler,
+				horizontal: &alignment_geometry,
+			};
+			&terrain_profile
+		}
+		VerticalProfileData::Pvi(pvi) => pvi,
 	};
 
 	// Degenerate fallback when the geometry pipeline has no drawable pieces.

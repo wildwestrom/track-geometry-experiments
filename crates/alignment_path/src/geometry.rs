@@ -587,16 +587,8 @@ mod tests {
 
 	#[test]
 	fn station_accumulates_monotonically() {
-		let alignment = Alignment::new(
-			Vec3::new(0.0, 0.0, 0.0),
-			Vec3::new(200.0, 0.0, 0.0),
-			1,
-		);
-		let geometry = calculate_alignment_geometry(
-			alignment.start,
-			alignment.end,
-			&alignment,
-		);
+		let alignment = Alignment::new(Vec3::new(0.0, 0.0, 0.0), Vec3::new(200.0, 0.0, 0.0), 1);
+		let geometry = calculate_alignment_geometry(alignment.start, alignment.end, &alignment);
 
 		let mut prev_end = 0.0_f32;
 		for segment in &geometry.segments {
@@ -613,16 +605,8 @@ mod tests {
 
 	#[test]
 	fn total_length_matches_segment_sum() {
-		let alignment = Alignment::new(
-			Vec3::new(0.0, 0.0, 0.0),
-			Vec3::new(200.0, 0.0, 200.0),
-			1,
-		);
-		let geometry = calculate_alignment_geometry(
-			alignment.start,
-			alignment.end,
-			&alignment,
-		);
+		let alignment = Alignment::new(Vec3::new(0.0, 0.0, 0.0), Vec3::new(200.0, 0.0, 200.0), 1);
+		let geometry = calculate_alignment_geometry(alignment.start, alignment.end, &alignment);
 		let sum: f32 = geometry.segments.iter().map(GeometrySegment::length).sum();
 		assert!((geometry.total_length() - sum).abs() < 1e-3);
 	}
@@ -639,11 +623,7 @@ mod tests {
 			})],
 			..Default::default()
 		};
-		let geometry = calculate_alignment_geometry(
-			alignment.start,
-			alignment.end,
-			&alignment,
-		);
+		let geometry = calculate_alignment_geometry(alignment.start, alignment.end, &alignment);
 		for segment in &geometry.segments {
 			if let GeometrySegment::Turn(turn) = segment {
 				let in_len = turn.ingoing_clothoid.length;

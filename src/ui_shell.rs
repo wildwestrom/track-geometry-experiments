@@ -23,6 +23,14 @@ impl Plugin for UiShellPlugin {
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct UiShellState {
 	pub active_panel: ActivePanel,
+	pub alignment_tab: AlignmentTab,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AlignmentTab {
+	#[default]
+	Horizontal,
+	Vertical,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

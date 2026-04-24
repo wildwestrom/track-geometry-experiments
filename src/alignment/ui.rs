@@ -1,9 +1,13 @@
 use crate::saveable::SaveableSettings;
-use crate::ui_shell::{ActivePanel, UiShellState};
+use crate::terrain::{self, calculate_terrain_height};
+use crate::ui_shell::{ActivePanel, AlignmentTab, UiShellState};
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 
-use alignment_path::PathSegment;
+use alignment_path::elevation::{Pvi, PviProfile, TerrainSampledProfile, VerticalProfileData};
+use alignment_path::{
+	ElevationProfile as _, HeightSampler, PathSegment, calculate_alignment_geometry,
+};
 
 use super::components::{AlignmentPoint, PointType};
 use super::constraints::compute_max_angle;
@@ -13,12 +17,52 @@ use super::{
 	MIN_ARC_RADIUS,
 };
 
+struct TerrainSampler<'a> {
+	heightmap: &'a terrain::HeightMap,
+	settings: &'a terrain::Settings,
+}
+
+impl HeightSampler for TerrainSampler<'_> {
+	fn height_at(&self, position: Vec3) -> f32 {
+		calculate_terrain_height(position, self.heightmap, self.settings)
+	}
+}
+
+const PVI_SAMPLE_COUNT: usize = 11;
+
+fn sample_pvips_from_terrain(
+	alignment: &alignment_path::Alignment,
+	start: Vec3,
+	end: Vec3,
+	sampler: &TerrainSampler<'_>,
+) -> PviProfile {
+	let geometry = calculate_alignment_geometry(start, end, alignment);
+	let total = geometry.total_length();
+	let profile = TerrainSampledProfile {
+		sampler,
+		horizontal: &geometry,
+	};
+	let n = PVI_SAMPLE_COUNT;
+	let points = (0..n)
+		.map(|i| {
+			let station = total * i as f32 / (n - 1) as f32;
+			Pvi {
+				station,
+				elevation: profile.elevation_at(station),
+			}
+		})
+		.collect();
+	PviProfile { points }
+}
+
 pub(crate) fn ui(
 	mut contexts: EguiContexts,
 	mut alignment_state: ResMut<AlignmentState>,
 	mut path_debug_level: ResMut<GeometryDebugLevel>,
-	ui_shell_state: Res<UiShellState>,
+	mut ui_shell_state: ResMut<UiShellState>,
 	alignment_pins: Query<(&Transform, &AlignmentPoint)>,
+	terrain_heightmap: Single<&terrain::HeightMap>,
+	terrain_settings: Res<terrain::Settings>,
 ) {
 	if ui_shell_state.active_panel != ActivePanel::AlignmentProperties {
 		return;
@@ -31,60 +75,89 @@ pub(crate) fn ui(
 			.movable(false)
 			.resizable(false)
 			.show(ctx, |ui| {
-				ui.label(format!("Path Debug Level: {path_debug_level}"));
 				ui.horizontal(|ui| {
-					for i in 0..=MAX_GEOMETRY_DEBUG_LEVEL {
-						if ui.button(i.to_string()).clicked() {
-							*path_debug_level = i;
-						};
-					}
+					ui.selectable_value(
+						&mut ui_shell_state.alignment_tab,
+						AlignmentTab::Horizontal,
+						"Horizontal",
+					);
+					ui.selectable_value(
+						&mut ui_shell_state.alignment_tab,
+						AlignmentTab::Vertical,
+						"Vertical",
+					);
 				});
-
-				ui.label(format!(
-					"Current alignment: {}",
-					alignment_state.current_alignment
-				));
-				ui.label(format!(
-					"Total alignments: {}",
-					alignment_state.alignments.len()
-				));
-				ui.label(format!("Total pins: {}", alignment_pins.iter().count()));
+				ui.separator();
 
 				let mut start_pos = Vec3::ZERO;
 				let mut end_pos = Vec3::ZERO;
-
 				for (transform, alignment_point) in alignment_pins.iter() {
 					if alignment_point.alignment_id == alignment_state.current_alignment {
 						match alignment_point.point_type {
-							PointType::Start => {
-								start_pos = transform.translation;
-							}
-							PointType::End => {
-								end_pos = transform.translation;
-							}
+							PointType::Start => start_pos = transform.translation,
+							PointType::End => end_pos = transform.translation,
 							PointType::Intermediate { .. } => {}
 						}
 					}
 				}
 
-				ui.separator();
+				if ui_shell_state.alignment_tab == AlignmentTab::Horizontal {
+					ui.label(format!("Path Debug Level: {path_debug_level}"));
+					ui.horizontal(|ui| {
+						for i in 0..=MAX_GEOMETRY_DEBUG_LEVEL {
+							if ui.button(i.to_string()).clicked() {
+								*path_debug_level = i;
+							};
+						}
+					});
 
-				display_position(ui, "Start (Red)", start_pos);
-				display_position(ui, "End (Blue)", end_pos);
-				ui.separator();
+					ui.label(format!(
+						"Current alignment: {}",
+						alignment_state.current_alignment
+					));
+					ui.label(format!(
+						"Total alignments: {}",
+						alignment_state.alignments.len()
+					));
+					ui.label(format!("Total pins: {}", alignment_pins.iter().count()));
 
-				ui.label("Select Alignment:");
-				alignment_selection_ui(ui, &mut alignment_state);
-				ui.separator();
+					ui.separator();
 
-				ui.label("Vertices:");
-				vertex_properties_ui(ui, &mut alignment_state);
-				ui.separator();
+					display_position(ui, "Start (Red)", start_pos);
+					display_position(ui, "End (Blue)", end_pos);
+					ui.separator();
 
-				ui.label("Create New Alignment:");
-				alignment_creation_ui(ui, &mut alignment_state, start_pos, end_pos);
-				ui.separator();
+					ui.label("Select Alignment:");
+					alignment_selection_ui(ui, &mut alignment_state);
+					ui.separator();
 
+					ui.label("Vertices:");
+					vertex_properties_ui(ui, &mut alignment_state);
+					ui.separator();
+
+					ui.label("Create New Alignment:");
+					alignment_creation_ui(ui, &mut alignment_state, start_pos, end_pos);
+				} else {
+					let sampler = TerrainSampler {
+						heightmap: &terrain_heightmap,
+						settings: &terrain_settings,
+					};
+					// Auto-initialize PVI from terrain on first visit
+					let current_id = alignment_state.current_alignment;
+					if let Some(alignment) = alignment_state.alignments.get_mut(&current_id) {
+						if matches!(
+							alignment.vertical_profile,
+							VerticalProfileData::TerrainSampled
+						) {
+							alignment.vertical_profile = VerticalProfileData::Pvi(sample_pvips_from_terrain(
+								alignment, start_pos, end_pos, &sampler,
+							));
+						}
+					}
+					vertical_profile_ui(ui, &mut alignment_state, start_pos, end_pos);
+				}
+
+				ui.separator();
 				let alignment_state: &AlignmentState = &alignment_state;
 				alignment_state.handle_save_operation_ui(ui, "Save Alignments");
 			});
@@ -229,4 +302,80 @@ fn alignment_creation_ui(
 			alignment_state.current_alignment = new_id;
 		}
 	});
+}
+
+fn vertical_profile_ui(
+	ui: &mut egui::Ui,
+	alignment_state: &mut AlignmentState,
+	start_pos: Vec3,
+	end_pos: Vec3,
+) {
+	let current_id = alignment_state.current_alignment;
+	let Some(alignment) = alignment_state.alignments.get_mut(&current_id) else {
+		ui.label("No alignment selected.");
+		return;
+	};
+
+	let total_length = calculate_alignment_geometry(start_pos, end_pos, alignment).total_length();
+
+	let VerticalProfileData::Pvi(profile) = &mut alignment.vertical_profile else {
+		return;
+	};
+
+	let mut index_to_delete: Option<usize> = None;
+	let mut changed = false;
+
+	egui::Grid::new("pvi_table")
+		.num_columns(3)
+		.spacing(egui::Vec2::splat(2.0))
+		.show(ui, |ui| {
+			ui.label("Station");
+			ui.label("Elevation");
+			ui.label("");
+			ui.end_row();
+
+			for (i, pvi) in profile.points.iter_mut().enumerate() {
+				if ui
+					.add(
+						egui::DragValue::new(&mut pvi.station)
+							.speed(1.0)
+							.suffix(" m")
+							.range(0.0..=total_length),
+					)
+					.changed()
+				{
+					changed = true;
+				}
+				ui.add(
+					egui::DragValue::new(&mut pvi.elevation)
+						.speed(0.1)
+						.suffix(" m"),
+				);
+				if ui.small_button("X").clicked() {
+					index_to_delete = Some(i);
+				}
+				ui.end_row();
+			}
+		});
+
+	if let Some(i) = index_to_delete {
+		profile.points.remove(i);
+	}
+
+	let last_station = profile.points.last().map(|p| p.station).unwrap_or(0.0);
+	if ui.button("Add PVI").clicked() {
+		profile.points.push(Pvi {
+			station: last_station + 100.0,
+			elevation: 0.0,
+		});
+		changed = true;
+	}
+
+	if changed {
+		profile.points.sort_by(|a, b| {
+			a.station
+				.partial_cmp(&b.station)
+				.unwrap_or(std::cmp::Ordering::Equal)
+		});
+	}
 }

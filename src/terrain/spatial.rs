@@ -1,7 +1,6 @@
 use super::Settings;
 use bevy::prelude::*;
 
-
 /// Convert grid coordinates to world coordinates
 pub fn grid_to_world(grid_x: u32, grid_z: u32, settings: &Settings) -> Vec3 {
 	let world_x = settings.world_x();
@@ -45,8 +44,7 @@ pub fn calculate_terrain_height(
 	let h01 = heightmap.get(x0, z1);
 	let h11 = heightmap.get(x1, z1);
 
-	let base_height = (h00 * (1.0 - tx) + h10 * tx) * (1.0 - tz)
-		+ (h01 * (1.0 - tx) + h11 * tx) * tz;
+	let base_height = (h00 * (1.0 - tx) + h10 * tx) * (1.0 - tz) + (h01 * (1.0 - tx) + h11 * tx) * tz;
 
 	base_height * world_size_for_height(settings) * settings.height_multiplier
 }
