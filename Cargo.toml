@@ -31,8 +31,8 @@ bevy = { version = "0.18", default-features = false, features = [
   # "2d_bevy_render",
   "3d_api",
   "3d_bevy_render",
-  # "ui_api",
-  # "ui_bevy_render",
+  "ui_api",
+  "ui_bevy_render",
   # "default_no_std",
   ### non-default-features as of 0.17.3
   "bevy_gizmos",
