@@ -18,7 +18,7 @@ categories = ["simulation", "visualization"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [workspace.dependencies]
-bevy = { version = "0.18", default-features = false, features = [
+bevy = { version = "0.18.1", default-features = false, features = [
   ### Collections
   # "dev",
   # "audio",
@@ -34,8 +34,8 @@ bevy = { version = "0.18", default-features = false, features = [
   "ui_api",
   "ui_bevy_render",
   # "default_no_std",
-  ### non-default-features as of 0.17.3
   "bevy_gizmos",
+  ### non-default-features as of 0.18.1
   "serialize",
   "shader_format_wesl",
   "webgpu",
@@ -56,7 +56,7 @@ serde_json = "1.0"
 anyhow = "1.0"
 bevy_tweening = "0.15"
 spec_math = "0.1"
-glam = { version = "0.30", features = ["serde"] }
+glam = { version = "0.30.10", features = ["serde"] } # Just keep in sync with bevy
 
 [dependencies]
 bevy = { workspace = true }
