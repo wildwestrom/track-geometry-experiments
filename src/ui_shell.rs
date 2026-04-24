@@ -1,9 +1,9 @@
 use bevy::prelude::*;
+use bevy::window::{PresentMode, PrimaryWindow};
 use bevy_egui::{EguiContexts, egui};
 
 use crate::alignment::{MAX_SNAP_ANGLE_DEGREES, MIN_SNAP_ANGLE_DEGREES};
 use crate::alignment::{TangentSnapSettings, TrackBuildingMode};
-#[cfg(debug_assertions)]
 use crate::debug_frame_limiter::DebugFrameLimiterState;
 use crate::terrain::ContourState;
 
@@ -15,8 +15,6 @@ impl Plugin for UiShellPlugin {
 			bevy_egui::EguiPrimaryContextPass,
 			(bottom_bar_ui, settings_ui),
 		);
-		#[cfg(debug_assertions)]
-		app.add_systems(bevy_egui::EguiPrimaryContextPass, frame_limiter_ui);
 	}
 }
 
@@ -42,8 +40,6 @@ pub enum ActivePanel {
 	AlignmentProperties,
 	Visualizations,
 	Settings,
-	#[cfg(debug_assertions)]
-	FrameRateLimiter,
 }
 
 fn bottom_bar_ui(
@@ -51,7 +47,6 @@ fn bottom_bar_ui(
 	mut shell_state: ResMut<UiShellState>,
 	mut track_building_mode: ResMut<TrackBuildingMode>,
 	mut contour_state: ResMut<ContourState>,
-	#[cfg(debug_assertions)] mut frame_limiter: ResMut<DebugFrameLimiterState>,
 ) {
 	let Ok(ctx) = contexts.ctx_mut() else {
 		return;
@@ -84,21 +79,6 @@ fn bottom_bar_ui(
 				"Visualizations",
 				ActivePanel::Visualizations,
 			);
-			panel_button(ui, &mut shell_state, "settings", ActivePanel::Settings);
-
-			#[cfg(debug_assertions)]
-			{
-				let limiter_label = if frame_limiter.enabled {
-					format!("FPS Limit: {} Hz", frame_limiter.target_fps)
-				} else {
-					"FPS Limit: Off".to_owned()
-				};
-				let button = egui::Button::new(limiter_label).selected(frame_limiter.enabled);
-				if ui.add(button).clicked() {
-					frame_limiter.enabled = !frame_limiter.enabled;
-					shell_state.active_panel = ActivePanel::FrameRateLimiter;
-				}
-			}
 
 			let build_label = if track_building_mode.active {
 				"Exit Build (Esc/F)"
@@ -109,6 +89,8 @@ fn bottom_bar_ui(
 			if ui.add(build_button).clicked() {
 				track_building_mode.active = !track_building_mode.active;
 			}
+
+			panel_button(ui, &mut shell_state, "Settings", ActivePanel::Settings);
 		});
 	});
 }
@@ -117,12 +99,19 @@ fn settings_ui(
 	mut contexts: EguiContexts,
 	ui_shell_state: Res<UiShellState>,
 	mut snap_settings: ResMut<TangentSnapSettings>,
+	mut windows: Query<&mut Window, With<PrimaryWindow>>,
+	mut frame_limiter: ResMut<DebugFrameLimiterState>,
 ) {
 	if ui_shell_state.active_panel != ActivePanel::Settings {
 		return;
 	}
 
 	let Ok(ctx) = contexts.ctx_mut() else {
+		return;
+	};
+
+	let Ok(mut window) = windows.single_mut() else {
+		warn!("No window found!");
 		return;
 	};
 
@@ -135,6 +124,36 @@ fn settings_ui(
 				.num_columns(2)
 				.spacing(egui::vec2(8.0, 6.0))
 				.show(ui, |ui| {
+					ui.label("VSync");
+					let mut vsync = window.present_mode == PresentMode::AutoVsync;
+					if ui.checkbox(&mut vsync, "").changed() {
+						window.present_mode = if vsync {
+							PresentMode::AutoVsync
+						} else {
+							PresentMode::AutoNoVsync
+						};
+					}
+					ui.end_row();
+					{
+						ui.label("FPS limit");
+						ui.checkbox(&mut frame_limiter.enabled, "Enabled");
+						ui.end_row();
+						if frame_limiter.enabled {
+							ui.label("Target FPS");
+							let mut fps_i32 = i32::try_from(frame_limiter.target_fps).unwrap_or(i32::MAX);
+							if ui
+								.add(
+									egui::DragValue::new(&mut fps_i32)
+										.range(1..=i32::MAX)
+										.speed(1.0),
+								)
+								.changed()
+							{
+								frame_limiter.target_fps = u32::try_from(fps_i32.max(1)).unwrap_or(u32::MAX);
+							}
+							ui.end_row();
+						}
+					}
 					ui.label("Snap angle");
 					ui.add(
 						egui::Slider::new(
@@ -153,53 +172,6 @@ fn settings_ui(
 					);
 					ui.end_row();
 				});
-		});
-}
-
-#[cfg(debug_assertions)]
-pub(crate) fn frame_limiter_ui(
-	mut contexts: EguiContexts,
-	mut frame_limiter: ResMut<DebugFrameLimiterState>,
-	ui_shell_state: Res<UiShellState>,
-) {
-	if ui_shell_state.active_panel != ActivePanel::FrameRateLimiter {
-		return;
-	}
-
-	let Ok(ctx) = contexts.ctx_mut() else {
-		return;
-	};
-
-	egui::Window::new("Frame Rate Limiter")
-		.fixed_pos(egui::pos2(8.0, 8.0))
-		.movable(false)
-		.resizable(false)
-		.show(ctx, |ui| {
-			ui.horizontal(|ui| {
-				ui.label("Limiter:");
-				let status = if frame_limiter.enabled {
-					"Enabled"
-				} else {
-					"Disabled"
-				};
-				ui.label(status);
-			});
-
-			ui.separator();
-			ui.label("Target FPS (debug mode only):");
-
-			let mut fps_i32 = i32::try_from(frame_limiter.target_fps).unwrap_or(i32::MAX);
-			if ui
-				.add(
-					egui::DragValue::new(&mut fps_i32)
-						.range(1..=i32::MAX)
-						.speed(1.0),
-				)
-				.changed()
-			{
-				let clamped = fps_i32.max(1);
-				frame_limiter.target_fps = u32::try_from(clamped).unwrap_or(u32::MAX);
-			}
 		});
 }
 

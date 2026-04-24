@@ -4,12 +4,12 @@ use bevy::render::settings::WgpuFeatures;
 use bevy::{
 	prelude::*,
 	render::{RenderPlugin, settings::WgpuSettings},
+	window::PresentMode,
 };
 use bevy_egui::EguiPlugin;
 
 mod alignment;
 mod camera;
-#[cfg(debug_assertions)]
 mod debug_frame_limiter;
 mod hud;
 mod pin;
@@ -19,7 +19,6 @@ mod ui_shell;
 
 use crate::alignment::AlignmentPlugin;
 use crate::camera::CameraPlugin;
-#[cfg(debug_assertions)]
 use crate::debug_frame_limiter::DebugFrameLimiterPlugin;
 use crate::pin::PinPlugin;
 use crate::terrain::TerrainPlugin;
@@ -47,6 +46,7 @@ fn main() {
 				.set(WindowPlugin {
 					primary_window: Some(Window {
 						fit_canvas_to_parent: true,
+						present_mode: PresentMode::AutoNoVsync,
 						..default()
 					}),
 					..default()
@@ -72,7 +72,6 @@ fn main() {
 		})
 		.add_systems(Update, toggle_wireframe_system);
 
-	#[cfg(debug_assertions)]
 	app.add_plugins(DebugFrameLimiterPlugin);
 
 	if HUD {

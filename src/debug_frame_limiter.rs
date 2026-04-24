@@ -23,7 +23,7 @@ pub(crate) struct DebugFrameLimiterState {
 impl Default for DebugFrameLimiterState {
 	fn default() -> Self {
 		Self {
-			enabled: true,
+			enabled: false,
 			target_fps: 60,
 			last_frame_end: None,
 		}
