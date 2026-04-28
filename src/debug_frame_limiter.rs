@@ -3,24 +3,24 @@ use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
 
-pub(crate) struct DebugFrameLimiterPlugin;
+pub(crate) struct FrameLimiterPlugin;
 
-impl Plugin for DebugFrameLimiterPlugin {
+impl Plugin for FrameLimiterPlugin {
 	fn build(&self, app: &mut App) {
 		app
-			.init_resource::<DebugFrameLimiterState>()
+			.init_resource::<FrameLimiterState>()
 			.add_systems(Last, enforce_frame_limit);
 	}
 }
 
 #[derive(Resource, Debug, Clone)]
-pub(crate) struct DebugFrameLimiterState {
+pub(crate) struct FrameLimiterState {
 	pub enabled: bool,
 	pub target_fps: u32,
 	last_frame_end: Option<Instant>,
 }
 
-impl Default for DebugFrameLimiterState {
+impl Default for FrameLimiterState {
 	fn default() -> Self {
 		Self {
 			enabled: false,
@@ -30,7 +30,7 @@ impl Default for DebugFrameLimiterState {
 	}
 }
 
-fn enforce_frame_limit(mut limiter: ResMut<DebugFrameLimiterState>) {
+fn enforce_frame_limit(mut limiter: ResMut<FrameLimiterState>) {
 	if !limiter.enabled {
 		limiter.last_frame_end = None;
 		return;

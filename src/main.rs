@@ -19,7 +19,7 @@ mod ui_shell;
 
 use crate::alignment::AlignmentPlugin;
 use crate::camera::CameraPlugin;
-use crate::debug_frame_limiter::DebugFrameLimiterPlugin;
+use crate::debug_frame_limiter::FrameLimiterPlugin;
 use crate::pin::PinPlugin;
 use crate::terrain::TerrainPlugin;
 use crate::ui_shell::UiShellPlugin;
@@ -46,7 +46,7 @@ fn main() {
 				.set(WindowPlugin {
 					primary_window: Some(Window {
 						fit_canvas_to_parent: true,
-						present_mode: PresentMode::AutoNoVsync,
+						present_mode: PresentMode::AutoVsync,
 						..default()
 					}),
 					..default()
@@ -72,7 +72,7 @@ fn main() {
 		})
 		.add_systems(Update, toggle_wireframe_system);
 
-	app.add_plugins(DebugFrameLimiterPlugin);
+	app.add_plugins(FrameLimiterPlugin);
 
 	if HUD {
 		app.add_plugins(hud::CameraDebugHud);

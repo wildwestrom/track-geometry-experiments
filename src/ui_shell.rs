@@ -4,7 +4,7 @@ use bevy_egui::{EguiContexts, egui};
 
 use crate::alignment::{MAX_SNAP_ANGLE_DEGREES, MIN_SNAP_ANGLE_DEGREES};
 use crate::alignment::{TangentSnapSettings, TrackBuildingMode};
-use crate::debug_frame_limiter::DebugFrameLimiterState;
+use crate::debug_frame_limiter::FrameLimiterState;
 use crate::terrain::ContourState;
 
 pub struct UiShellPlugin;
@@ -100,7 +100,7 @@ fn settings_ui(
 	ui_shell_state: Res<UiShellState>,
 	mut snap_settings: ResMut<TangentSnapSettings>,
 	mut windows: Query<&mut Window, With<PrimaryWindow>>,
-	mut frame_limiter: ResMut<DebugFrameLimiterState>,
+	mut frame_limiter: ResMut<FrameLimiterState>,
 ) {
 	if ui_shell_state.active_panel != ActivePanel::Settings {
 		return;
